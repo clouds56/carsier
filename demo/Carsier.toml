@@ -1,0 +1,8 @@
+[package]
+name = "demo"
+version = "0.1.0"
+authors = ["Clouds Flowing <clouds.flowing@gmail.com>"]
+edition = "2.13"
+
+[dependencies]
+breeze = { version = "*", binary = "maven2" }
