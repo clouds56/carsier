@@ -5,7 +5,15 @@ use std::io::Write;
 
 #[derive(Clap)]
 pub struct Opts {
-  name: Option<String>,
+  #[clap(long = "name")]
+  pub name: Option<String>,
+}
+
+#[derive(Clap)]
+pub struct NewOpts {
+  pub foldername: String,
+  #[clap(flatten)]
+  pub opts: Opts,
 }
 
 const TOML_TEMPLATE: &str = r#"

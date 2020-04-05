@@ -16,12 +16,15 @@ use config::{PackageConfig, repo::RepoConfig};
 pub struct Opts {
   #[clap(short = "C", default_value = ".")]
   workdir: PathBuf,
+  #[clap(long = "config")]
+  config: Option<PathBuf>,
   #[clap(subcommand)]
   subcmd: SubCommand,
 }
 
 #[derive(Clap)]
 pub enum SubCommand {
+  New(init::NewOpts),
   Init(init::Opts),
   // TODO: https://github.com/clap-rs/clap/issues/1672
   // #[clap(external_subcommand)]
@@ -66,11 +69,21 @@ fn main() {
   let opts: Opts = Opts::parse();
   debug!("workdir {:?}", opts.workdir.display());
   std::env::set_current_dir(&opts.workdir).expect("chdir failed");
-  if let SubCommand::Init(sub_opts) = opts.subcmd {
-    init_logger(None);
-    init::main(sub_opts).expect("execute failed");
-    return
-  }
+  let subcmd = match opts.subcmd {
+    SubCommand::Init(sub_opts) => {
+      init_logger(None);
+      init::main(sub_opts).expect("execute failed");
+      return
+    },
+    SubCommand::New(sub_opts) => {
+      init_logger(None);
+      std::fs::create_dir(&sub_opts.foldername).expect("folder already exists");
+      std::env::set_current_dir(&sub_opts.foldername).expect("chdir failed");
+      init::main(sub_opts.opts).expect("execute failed");
+      return
+    },
+    subcmd => subcmd,
+  };
   // load_repo_config("../configs/repo.toml").unwrap();
-  load_config("Carsier.toml").expect("load config");
+  let config = load_config(opts.config.unwrap_or_else(|| config::constant::toml_name().into())).expect("load config");
 }
