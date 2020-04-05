@@ -1,2 +1,4 @@
 /target
+.metals
 Cargo.lock
+test/

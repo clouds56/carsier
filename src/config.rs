@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+pub mod constant;
 pub mod repo;
 
 /// a config file looks like
