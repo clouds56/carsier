@@ -5,4 +5,4 @@ authors = ["Clouds Flowing <clouds.flowing@gmail.com>"]
 edition = "2.13"
 
 [dependencies]
-breeze = { version = "*", binary = "maven" }
+breeze = { version = "*", org = "org.scalanlp" }

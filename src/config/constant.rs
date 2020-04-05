@@ -20,3 +20,7 @@ pub fn toml_name() -> String {
   }
   format!("{}.toml", first_letter_to_uppper_case(NAME))
 }
+
+pub fn target_dir() -> std::path::PathBuf {
+  std::path::Path::new("target").to_owned()
+}

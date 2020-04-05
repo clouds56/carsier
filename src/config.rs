@@ -1,7 +1,9 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 pub mod constant;
 pub mod repo;
+mod version;
+pub use version::VersionRange;
 
 /// a config file looks like
 /// ```
@@ -16,36 +18,58 @@ pub mod repo;
 /// ```
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PackageConfig {
-  package: Package,
-  dependencies: HashMap<String, DependencyLike>
+  pub package: Package,
+  pub dependencies: BTreeMap<String, DependencyLike>
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Package {
-  name: String,
-  version: Version,
+  pub name: String,
+  pub version: Version,
   #[serde(default)]
-  authors: Vec<String>,
-  edition: String,
+  pub authors: Vec<String>,
+  pub edition: String,
   #[serde(flatten)]
-  others: HashMap<String, String>,
+  pub others: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum DependencyLike {
-  String(Version),
+  Version(VersionRange),
   Full(Dependency),
+}
+impl DependencyLike {
+  pub fn as_dep(&self) -> std::borrow::Cow<'_, Dependency> {
+    use std::borrow::Cow;
+    match self {
+      DependencyLike::Full(dep) => Cow::Borrowed(dep),
+      DependencyLike::Version(version) => Cow::Owned(version.clone().into()),
+    }
+  }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Dependency {
-  version: Version,
+  pub version: VersionRange,
   #[serde(default)]
-  features: Vec<String>,
+  pub features: Vec<String>,
+  #[serde(default)]
+  pub java: bool,
+  pub org: Option<String>,
   #[serde(flatten)]
-  others: HashMap<String, String>,
+  pub others: BTreeMap<String, String>,
+}
+impl From<VersionRange> for Dependency {
+  fn from(s: VersionRange) -> Self {
+    Self {
+      version: s,
+      features: Default::default(),
+      java: Default::default(),
+      org: Default::default(),
+      others: Default::default(),
+    }
+  }
 }
 
-// TODO support ~0.3 ^3.1.2 =0.1.0
 pub type Version = String;
