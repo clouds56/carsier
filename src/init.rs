@@ -32,6 +32,8 @@ const INGORE_CONTENT: &str = r#"
 "#;
 
 const HELLO_CODE: &str = r#"
+package %%;
+
 object Main extends App {
   println("hello, world!");
 }

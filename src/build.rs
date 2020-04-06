@@ -1,5 +1,5 @@
 use crate::config::PackageConfig;
-use crate::resolve;
+use crate::{resolve, preprocess};
 use crate::utils;
 use crate::config::constant::*;
 
@@ -7,6 +7,8 @@ use crate::config::constant::*;
 pub struct Opts {
   #[clap(flatten)]
   pub target: TargetOpts,
+  #[clap(flatten)]
+  pub preprocess: preprocess::Opts,
   #[clap(flatten)]
   pub resolve: resolve::Opts,
 }
@@ -24,7 +26,15 @@ fn compile<P: AsRef<std::path::Path>>(path: P, cp: &str) -> Result<std::path::Pa
   debug!("{:?} {:?}", mod_path, mod_name);
   let target = target_dir().join("build").join(mod_name).with_extension("jar");
   std::fs::create_dir_all(target.parent().unwrap())?;
-  utils::call("scalac", &["-classpath".as_ref(), cp.trim().as_ref(), path.as_ref().as_os_str(), "-d".as_ref(), target.as_ref()])?;
+  let opts = vec![
+    "--class-path", cp,
+    "--source-path", "src",
+  ];
+  utils::call("scalac", opts.into_iter().map(std::ffi::OsStr::new).chain(vec![
+    // "--dependency-file".as_ref(), target_dir().join("scala_dep").as_ref(),
+    path.as_ref().as_os_str(),
+    "-d".as_ref(), target.as_ref(),
+  ].into_iter()))?;
   info!("compiled: {} => {}", path.as_ref().display(), target.display());
   Ok(target)
 }
@@ -32,7 +42,7 @@ fn compile<P: AsRef<std::path::Path>>(path: P, cp: &str) -> Result<std::path::Pa
 pub fn main(opts: Opts, config: &PackageConfig) -> Result<(), failure::Error> {
   resolve::main(opts.resolve, config)?;
   let path = "src/main.scala";
-  let classpath = utils::load_content(target_dir().join("deps.classpath"))?.ok_or_else(|| failure::err_msg("not resolved"))?;
-  compile(path, &classpath)?;
+  preprocess::main(opts.preprocess, config)?;
+  compile(path, "@target/deps.classpath")?;
   Ok(())
 }

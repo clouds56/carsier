@@ -1,3 +1,9 @@
+package %%;
+import %%.{a, b};
+import a._;
+
+class M {}
 object Main extends App {
-  println("hello, world!");
+  val x = new A;
+  println(s"hello, ${x.text}!");
 }

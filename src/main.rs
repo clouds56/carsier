@@ -10,8 +10,9 @@ use std::path::{Path, PathBuf};
 pub mod config;
 mod init;
 mod utils;
-mod build;
 mod resolve;
+mod preprocess;
+mod build;
 
 use config::{PackageConfig, repo::RepoConfig};
 
@@ -45,23 +46,15 @@ pub enum SubCommand {
   External(ExternelOpts),
 }
 
-fn load_content<P: AsRef<Path>>(path: P) -> Result<String, failure::Error> {
-  use std::io::Read;
-  let mut f = std::fs::File::open(path)?;
-  let mut content = String::new();
-  f.read_to_string(&mut content)?;
-  Ok(content)
-}
-
 pub fn load_repo_config<P: AsRef<Path>>(path: P) -> Result<RepoConfig, failure::Error> {
-  let toml_str = load_content(path)?;
+  let toml_str = utils::load_content(path)?.ok_or_else(|| failure::err_msg("open repo_config file"))?;
   let config: RepoConfig = toml::from_str(&toml_str)?;
   println!("{:#?}", config);
   Ok(config)
 }
 
 fn load_config<P: AsRef<Path>>(path: P) -> Result<PackageConfig, failure::Error> {
-  let toml_str = load_content(path)?;
+  let toml_str = utils::load_content(path)?.ok_or_else(|| failure::err_msg("open config file"))?;
   let config: PackageConfig = toml::from_str(&toml_str)?;
   println!("{:#?}", config);
   Ok(config)

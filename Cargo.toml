@@ -12,5 +12,6 @@ simplelog = "*"
 failure = "*"
 clap = { git = "https://github.com/clap-rs/clap" } # for 3.0.0-beta.1
 toml = "*"
+serde_json = "*"
 semver-parser = "*"
 serde = { version = "*", features = ["derive"] }
