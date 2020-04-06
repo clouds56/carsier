@@ -49,14 +49,14 @@ pub enum SubCommand {
 pub fn load_repo_config<P: AsRef<Path>>(path: P) -> Result<RepoConfig, failure::Error> {
   let toml_str = utils::load_content(path)?.ok_or_else(|| failure::err_msg("open repo_config file"))?;
   let config: RepoConfig = toml::from_str(&toml_str)?;
-  println!("{:#?}", config);
+  dbg!(&config);
   Ok(config)
 }
 
 fn load_config<P: AsRef<Path>>(path: P) -> Result<PackageConfig, failure::Error> {
   let toml_str = utils::load_content(path)?.ok_or_else(|| failure::err_msg("open config file"))?;
   let config: PackageConfig = toml::from_str(&toml_str)?;
-  println!("{:#?}", config);
+  dbg!(&config);
   Ok(config)
 }
 

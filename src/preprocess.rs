@@ -2,7 +2,7 @@ use crate::config::PackageConfig;
 use crate::utils;
 use crate::config::constant::*;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
 use std::path::{Path, PathBuf};
 
 #[derive(Clap)]
@@ -182,24 +182,26 @@ impl std::str::FromStr for Imports {
   }
 }
 
-fn preprocess(mods: &mut HashMap<PathBuf, String>, current: Mod, root_prefix: &str) -> Result<(), failure::Error> {
+fn preprocess(mods: &mut HashMap<Mod, Vec<PathBuf>>, current: Mod, root_prefix: &str) -> Result<(), failure::Error> {
   use std::io::Write;
   let mut queue = Vec::<Mod>::new();
   for path in current.files() {
+    let mut actual_current = current.clone();
+    // let current = ();
     if let Some(content) = utils::load_content(&path)? {
       let out_path = target_dir().join(&path);
       std::fs::create_dir_all(out_path.parent().expect("parent"))?;
       let mut fout = std::fs::File::create(&out_path)?;
-      debug!("transform: {} => {}", path.display(), out_path.display());
-      mods.insert(path, current.show());
+      info!("transform: {} => {}", path.display(), out_path.display());
       for line in content.lines() {
         let ln = line.trim();
         if ln.is_empty() || ln.starts_with("//") { }
         if ln.starts_with("package") {
           let package = ln["package".len()..].trim().trim_end_matches(";");
           if package.starts_with("%") {
-            let package = package.parse::<Mod>().map_err(failure::err_msg)?.transform(&current)?;
-            write!(fout, "package {}{}{};", root_prefix, if package.is_empty() { "" } else { "." }, package.show())?; // TODO _root_
+            actual_current = package.parse::<Mod>().map_err(failure::err_msg)?.transform(&actual_current)?;
+            debug!("current: {:?} => {:?}", current.show(), actual_current.show());
+            write!(fout, "package {}{}{};", root_prefix, if actual_current.is_empty() { "" } else { "." }, actual_current.show())?; // TODO _root_
             let mut sp = root_prefix.rsplitn(2, '.');
             let name = sp.next().unwrap();
             let root = sp.next().unwrap_or("_root_");
@@ -210,7 +212,7 @@ fn preprocess(mods: &mut HashMap<PathBuf, String>, current: Mod, root_prefix: &s
           debug!("parsing line: {}", ln);
           let imports = ln["import".len()..].trim().trim_end_matches(";");
           if imports.starts_with("%") {
-            let imports = imports.parse::<Imports>()?.normalize(&current)?;
+            let imports = imports.parse::<Imports>()?.normalize(&actual_current)?;
             let new_mods = imports.mods();
             debug!("found mod: {:?}", &new_mods);
             queue.extend(new_mods);
@@ -220,9 +222,14 @@ fn preprocess(mods: &mut HashMap<PathBuf, String>, current: Mod, root_prefix: &s
         }
         writeln!(fout, "{}", line)?;
       }
+      mods.entry(actual_current).or_default().push(path.clone());
     }
   }
-  queue.into_iter().map(|c| preprocess(mods, c, root_prefix)).collect::<Result<(), _>>()?;
+  for c in queue {
+    if !mods.contains_key(&c) {
+      preprocess(mods, c, root_prefix)?
+    }
+  }
   Ok(())
 }
 
@@ -239,8 +246,9 @@ pub fn main(opts: Opts, config: &PackageConfig) -> Result<(), failure::Error> {
   let root = opts.start.map(|s| s.parse::<Mod>().map_err(failure::err_msg)).transpose()?.unwrap_or_else(detect_start);
   let mut mods = HashMap::new();
   preprocess(&mut mods, root, &root_prefix)?;
+  let mods = mods.iter().map(|(i, v)| (i.show(), v)).collect::<BTreeMap<_,_>>();
   let mods_str = serde_json::to_string_pretty(&mods)?;
-  let paths_str = mods.keys().map(|i| target_dir().join(i).display().to_string()).collect::<Vec<_>>().join("\n");
+  let paths_str = mods.values().flat_map(|i| i.iter()).map(|i| target_dir().join(i).display().to_string()).collect::<Vec<_>>().join("\n");
   let _ = utils::compare_and_write(target_dir().join("mods.json"), mods_str.as_bytes())?;
   let _ = utils::compare_and_write(target_dir().join("src_files"), paths_str.as_bytes())?;
   Ok(())
