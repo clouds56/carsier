@@ -1,5 +1,7 @@
 pub const NAME: &str = "carsier";
 
+pub const PACKAGE_PREFIX: &str = "crates";
+
 pub const SCALA_VERSION: &str = "2.13";
 
 pub fn scala_edition() -> String {

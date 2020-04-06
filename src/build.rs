@@ -19,7 +19,7 @@ pub struct TargetOpts {
   pub release: bool,
 }
 
-fn compile<P: AsRef<std::path::Path>>(path: P, cp: &str) -> Result<std::path::PathBuf, failure::Error> {
+fn compile<P: AsRef<std::path::Path>>(path: P, cp: &str, files: &str) -> Result<std::path::PathBuf, failure::Error> {
   let mod_path = path.as_ref().ancestors().filter_map(|x| x.file_name()).collect::<Vec<_>>();
   let mut mod_name = mod_path.iter().skip(1).rev().skip(1).fold(std::ffi::OsString::new(), |mut acc, x| { acc.push(x); acc.push("."); acc });
   mod_name.push(path.as_ref().file_name().ok_or_else(|| failure::err_msg("no filename"))?);
@@ -32,8 +32,8 @@ fn compile<P: AsRef<std::path::Path>>(path: P, cp: &str) -> Result<std::path::Pa
   ];
   utils::call("scalac", opts.into_iter().map(std::ffi::OsStr::new).chain(vec![
     // "--dependency-file".as_ref(), target_dir().join("scala_dep").as_ref(),
-    path.as_ref().as_os_str(),
-    "-d".as_ref(), target.as_ref(),
+    files.as_ref(),
+    "-d".as_ref(), target.as_os_str(),
   ].into_iter()))?;
   info!("compiled: {} => {}", path.as_ref().display(), target.display());
   Ok(target)
@@ -43,6 +43,6 @@ pub fn main(opts: Opts, config: &PackageConfig) -> Result<(), failure::Error> {
   resolve::main(opts.resolve, config)?;
   let path = "src/main.scala";
   preprocess::main(opts.preprocess, config)?;
-  compile(path, "@target/deps.classpath")?;
+  compile(path, "@target/deps.classpath", "@target/src_files")?;
   Ok(())
 }

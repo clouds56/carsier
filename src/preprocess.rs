@@ -21,12 +21,12 @@ impl std::str::FromStr for Mod {
     if s.is_empty() {
       return Err("empty string")
     }
-    let mut mods = vec!["src".into()];
+    let mut mods = vec![];
     let is_bin = match s {
       "bin" => true,
       "lib" => false,
       _ => {
-        mods.extend(s.split('.').map(|s| s.to_string()));
+        mods = s.split('.').map(|s| s.to_string()).collect();
         false
       }
     };
@@ -37,10 +37,10 @@ impl Mod {
   fn all_files(&self) -> Vec<PathBuf> {
     // TODO: iterator
     let path_str = self.0.join("/");
-    if self.0.len() == 1 {
-      vec![ (path_str + if self.1 {"/main.scala"} else { "/lib.scala" }).into() ]
+    if self.0.is_empty() {
+      vec![ format!("src/{}.scala", if self.1 {"main"} else { "lib" }).into() ]
     } else {
-      vec![ (path_str.clone() + ".scala").into(), (path_str + "/lib.scala").into() ]
+      vec![ format!("src/{}.scala", path_str).into(), format!("src/{}/lib.scala", path_str).into() ]
     }
   }
 
@@ -52,17 +52,30 @@ impl Mod {
   pub fn is_empty(&self) -> bool { self.0.is_empty() }
   pub fn push(&mut self, s: String) { self.0.push(s) }
   pub fn concat(mut self, other: Mod) -> Self { self.0.extend(other.0); self }
+  /// % means `crate`
+  /// %% means `self`
+  /// %^ means `super`
+  /// %^^...^ means `super::super::...::super`
   pub fn transform(mut self, prefix: &Self) -> Result<Self, failure::Error> {
     match self.0.first() {
       Some(s) if s == "%" => self.0[0] = "src".to_string(),
       Some(s) if s == "%%" => self.0 = prefix.0.clone().into_iter().chain(self.0.into_iter().skip(1)).collect(),
-      Some(s) if s.starts_with("%") => return Err(failure::err_msg(format!("unknown percent {}", s))),
+      Some(s) if s.starts_with("%^") && s.trim_end_matches("^") == "%" => {
+        let depth = s.len() - 1;
+        if prefix.0.len() < depth {
+          return Err(failure::err_msg(format!("parent {:?} depth out of range {}", prefix, depth)));
+        }
+        self.0 = prefix.0.iter().rev().skip(depth).rev().cloned().chain(self.0.into_iter().skip(1)).collect();
+      },
+      Some(s) if s.starts_with("%") => {
+        return Err(failure::err_msg(format!("unknown percent {}", s)))
+      },
       _ => (),
     }
     Ok(self)
   }
   pub fn show(&self) -> String {
-    self.0[1..].join(".")
+    self.0.join(".")
   }
 }
 
@@ -112,6 +125,15 @@ impl Imports {
     Ok(result)
   }
 
+  fn normalize(mut self, current: &Mod) -> Result<Self, failure::Error> {
+    if self.0.is_empty() {
+      self.1 = self.1.into_iter().map(|i| i.normalize(current)).collect::<Result<_, _>>()?
+    } else {
+      self.0 = self.0.transform(current)?;
+    }
+    Ok(self)
+  }
+
   fn mods(&self) -> Vec<Mod> {
     let mut result = Vec::new();
     if self.1.is_empty() {
@@ -125,6 +147,25 @@ impl Imports {
       trace!("result: {:?}", result);
     }
     result
+  }
+
+  fn display_inner(&self, mut root: bool) -> String {
+    let mut s = self.0.show();
+    if !self.0.is_empty() && !self.1.is_empty() {
+      s.push('.');
+    }
+    if !self.0.is_empty() {
+      root = false
+    }
+    if !self.1.is_empty() {
+      if self.1.len() > 1 { s.push('{') }
+      s += &self.1.iter().map(|i| i.display_inner(root)).collect::<Vec<_>>().join(", ");
+      if self.1.len() > 1 { s.push('}') }
+    }
+    s
+  }
+  fn display(&self, root: &str) -> String {
+    format!("{}.{}", root, self.display_inner(true))
   }
 }
 impl std::str::FromStr for Imports {
@@ -141,32 +182,47 @@ impl std::str::FromStr for Imports {
   }
 }
 
-fn preprocess(mods: &mut HashMap<PathBuf, String>, current: Mod) -> Result<(), failure::Error> {
+fn preprocess(mods: &mut HashMap<PathBuf, String>, current: Mod, root_prefix: &str) -> Result<(), failure::Error> {
+  use std::io::Write;
   let mut queue = Vec::<Mod>::new();
   for path in current.files() {
     if let Some(content) = utils::load_content(&path)? {
-      debug!("parsing: {}", path.display());
+      let out_path = target_dir().join(&path);
+      std::fs::create_dir_all(out_path.parent().expect("parent"))?;
+      let mut fout = std::fs::File::create(&out_path)?;
+      debug!("transform: {} => {}", path.display(), out_path.display());
       mods.insert(path, current.show());
       for line in content.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with("//") || line.starts_with("package") {
-          continue;
-        } else if line.starts_with("import") {
-          debug!("parsing line: {}", line);
-          let imports = line["import".len()..].trim().trim_end_matches(";");
+        let ln = line.trim();
+        if ln.is_empty() || ln.starts_with("//") { }
+        if ln.starts_with("package") {
+          let package = ln["package".len()..].trim().trim_end_matches(";");
+          if package.starts_with("%") {
+            let package = package.parse::<Mod>().map_err(failure::err_msg)?.transform(&current)?;
+            write!(fout, "package {}{}{};", root_prefix, if package.is_empty() { "" } else { "." }, package.show())?; // TODO _root_
+            let mut sp = root_prefix.rsplitn(2, '.');
+            let name = sp.next().unwrap();
+            let root = sp.next().unwrap_or("_root_");
+            writeln!(fout, "  import {}.{{{} => %}};", root, name)?;
+            continue;
+          }
+        } else if ln.starts_with("import") {
+          debug!("parsing line: {}", ln);
+          let imports = ln["import".len()..].trim().trim_end_matches(";");
           if imports.starts_with("%") {
-            let new_mods = imports.parse::<Imports>()?.mods()
-              .into_iter().map(|m| m.transform(&current)).collect::<Result<Vec<_>, _>>()?;
+            let imports = imports.parse::<Imports>()?.normalize(&current)?;
+            let new_mods = imports.mods();
             debug!("found mod: {:?}", &new_mods);
             queue.extend(new_mods);
+            writeln!(fout, "import {};", imports.display(root_prefix))?; // TODO _root_
+            continue;
           }
-        } else {
-          break
         }
+        writeln!(fout, "{}", line)?;
       }
     }
   }
-  queue.into_iter().map(|c| preprocess(mods, c)).collect::<Result<(), _>>()?;
+  queue.into_iter().map(|c| preprocess(mods, c, root_prefix)).collect::<Result<(), _>>()?;
   Ok(())
 }
 
@@ -179,11 +235,13 @@ fn detect_start() -> Mod {
 }
 
 pub fn main(opts: Opts, config: &PackageConfig) -> Result<(), failure::Error> {
+  let root_prefix = format!("{}.{}", PACKAGE_PREFIX, config.package.name);
   let root = opts.start.map(|s| s.parse::<Mod>().map_err(failure::err_msg)).transpose()?.unwrap_or_else(detect_start);
   let mut mods = HashMap::new();
-  preprocess(&mut mods, root)?;
+  preprocess(&mut mods, root, &root_prefix)?;
   let mods_str = serde_json::to_string_pretty(&mods)?;
-  std::fs::create_dir_all(target_dir().join("src"))?;
+  let paths_str = mods.keys().map(|i| target_dir().join(i).display().to_string()).collect::<Vec<_>>().join("\n");
   let _ = utils::compare_and_write(target_dir().join("mods.json"), mods_str.as_bytes())?;
+  let _ = utils::compare_and_write(target_dir().join("src_files"), paths_str.as_bytes())?;
   Ok(())
 }
