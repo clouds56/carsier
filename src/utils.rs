@@ -20,7 +20,7 @@ pub fn call<Args, S1>(cmd: &str, args: Args) -> Result<String, failure::Error>
   if p.status.success() {
     Ok(String::from_utf8(p.stdout)?)
   } else {
-    Err(CallError::new(cmd, p))?
+    Err(CallError::new(cmd, p).into())
   }
 }
 

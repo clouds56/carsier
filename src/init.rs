@@ -63,7 +63,7 @@ pub fn build_template(name: &str, edition: &str) -> String {
 pub fn main(opts: Opts) -> Result<(), failure::Error> {
   let name = match opts.name {
     Some(name) => name,
-    None => std::env::current_dir()?.file_name().ok_or(failure::err_msg("current dir is root"))?.to_string_lossy().to_string(),
+    None => std::env::current_dir()?.file_name().ok_or_else(|| failure::err_msg("current dir is root"))?.to_string_lossy().to_string(),
   };
   info!("init project {}", name);
   let mut toml_file = OpenOptions::new().write(true).create_new(true).open(toml_name())?;

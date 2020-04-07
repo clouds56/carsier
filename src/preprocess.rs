@@ -60,14 +60,14 @@ impl Mod {
     match self.0.first() {
       Some(s) if s == "%" => self.0[0] = "src".to_string(),
       Some(s) if s == "%%" => self.0 = prefix.0.clone().into_iter().chain(self.0.into_iter().skip(1)).collect(),
-      Some(s) if s.starts_with("%^") && s.trim_end_matches("^") == "%" => {
+      Some(s) if s.starts_with("%^") && s.trim_end_matches('^') == "%" => {
         let depth = s.len() - 1;
         if prefix.0.len() < depth {
           return Err(failure::err_msg(format!("parent {:?} depth out of range {}", prefix, depth)));
         }
         self.0 = prefix.0.iter().rev().skip(depth).rev().cloned().chain(self.0.into_iter().skip(1)).collect();
       },
-      Some(s) if s.starts_with("%") => {
+      Some(s) if s.starts_with('%') => {
         return Err(failure::err_msg(format!("unknown percent {}", s)))
       },
       _ => (),
@@ -81,6 +81,7 @@ impl Mod {
 
 #[derive(Debug)]
 struct Imports(Mod, Vec<Imports>);
+// TODO support underscore and alias
 impl Imports {
   pub fn new() -> Self {
     Imports(Mod(vec![], false), vec![])
@@ -164,6 +165,7 @@ impl Imports {
     }
     s
   }
+  #[allow(dead_code)]
   fn display(&self, root: &str) -> String {
     format!("{}.{}", root, self.display_inner(true))
   }
@@ -197,27 +199,32 @@ fn preprocess(mods: &mut HashMap<Mod, Vec<PathBuf>>, current: Mod, root_prefix: 
         let ln = line.trim();
         if ln.is_empty() || ln.starts_with("//") { }
         if ln.starts_with("package") {
-          let package = ln["package".len()..].trim().trim_end_matches(";");
-          if package.starts_with("%") {
+          let package = ln["package".len()..].trim().trim_end_matches(';');
+          if package.starts_with('%') {
             actual_current = package.parse::<Mod>().map_err(failure::err_msg)?.transform(&actual_current)?;
             debug!("current: {:?} => {:?}", current.show(), actual_current.show());
-            write!(fout, "package {}{}{};", root_prefix, if actual_current.is_empty() { "" } else { "." }, actual_current.show())?; // TODO _root_
+            let current_str = format!("{}{}{}", root_prefix, if actual_current.is_empty() { "" } else { "." }, actual_current.show());
+            write!(fout, "package {};", current_str)?; // TODO _root_
             let mut sp = root_prefix.rsplitn(2, '.');
             let name = sp.next().unwrap();
             let root = sp.next().unwrap_or("_root_");
-            writeln!(fout, "  import {}.{{{} => %}};", root, name)?;
+            write!(fout, "  import {}.{{{} => %}};", root, name)?;
+            let mut sp = current_str.rsplitn(2, '.');
+            let name = sp.next().unwrap();
+            let root = sp.next().unwrap_or("_root_");
+            writeln!(fout, "  import {}.{{{} => %%}};", root, name)?;
             continue;
           }
         } else if ln.starts_with("import") {
           debug!("parsing line: {}", ln);
-          let imports = ln["import".len()..].trim().trim_end_matches(";");
-          if imports.starts_with("%") {
+          let imports = ln["import".len()..].trim().trim_end_matches(';');
+          if imports.starts_with('%') {
             let imports = imports.parse::<Imports>()?.normalize(&actual_current)?;
             let new_mods = imports.mods();
             debug!("found mod: {:?}", &new_mods);
             queue.extend(new_mods);
-            writeln!(fout, "import {};", imports.display(root_prefix))?; // TODO _root_
-            continue;
+            // writeln!(fout, "import {};", imports.display(root_prefix))?; // TODO _root_
+            // continue;
           }
         }
         writeln!(fout, "{}", line)?;
