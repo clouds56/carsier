@@ -1,7 +1,7 @@
 package %%;
 
 class A {
-  val c = new %.b.C;
+  val c = new %.c.C;
   val m = new %.M;
   val a1 = new t.A1;
   val text = "world";

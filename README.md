@@ -27,15 +27,21 @@ Features
     /// it would automatically convert to
     /// ```scala
     /// package crates.crate_name.path.to.file;
-    /// import crates.{crate_name => %};
-    /// import crates.crate_name.path.to.{file => %%};
-    /// import crates.crate_name.path.{to => %^};
-    /// import crates.crate_name.{path => %^^};
-    /// import crates.{crate_name => %^^^};
+    /// import _root_.{crates => %:}
+    /// import %:.{crate_name => %};
+    /// import %:.crate_name.path.to.{file => %%};
+    /// import %:.crate_name.path.{to => %^};
+    /// import %:.crate_name.{path => %^^};
+    /// import %:.{crate_name => %^^^};
     /// ```
     package %%;
-    /// TODO: paragraph about specify package name
     ````
+    * you could also specify package name by absolute/relative path
+    ```scala
+    /// in src/factory/users/extends/lib.scala where %% resolves to %.factory.extends
+    /// would have package name to `crates.crate_name.factory.users.extra`
+    package %^.extra;
+    ```
 
 Cli
 ------

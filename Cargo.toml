@@ -10,6 +10,7 @@ edition = "2018"
 log = "*"
 simplelog = "*"
 failure = "*"
+glob = "*"
 clap = { git = "https://github.com/clap-rs/clap" } # for 3.0.0-beta.1
 toml = "*"
 serde_json = "*"

@@ -1,258 +1,168 @@
 use crate::config::PackageConfig;
 use crate::utils;
 use crate::config::constant::*;
+use failure::ResultExt;
 
-use std::collections::{HashMap, BTreeMap};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Clap)]
 pub struct Opts {
   #[clap(long)]
   pub features: Vec<String>,
-  #[clap(long="entry-path")]
-  pub start: Option<String>,
+  #[clap(long="include", default_value="src/**/*.scala")]
+  pub include: String,
+  #[clap(long="src-root")]
+  pub src_root: Option<String>,
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Mod(Vec<String>, bool);
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Prefix {
+  Relative(usize), Absolute, Root(String),
+}
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Mod(Prefix, Vec<String>);
+
+impl Mod {
+  // fn src_file(s: &str) -> PathBuf {
+  //   format!("src/{}.scala", s).into()
+  // }
+  // fn src_lib_file(s: &str) -> PathBuf {
+  //   format!("src/{}/lib.scala", s).into()
+  // }
+  // fn all_files(&self) -> Vec<PathBuf> {
+  //   // TODO: iterator
+  //   let path_str = self.1.join("/");
+  //   if self.1.is_empty() {
+  //     vec![ Mod::src_file("main"), Mod::src_file("lib") ]
+  //   } else {
+  //     vec![ Mod::src_file(&path_str), Mod::src_lib_file(&path_str) ]
+  //   }
+  // }
+
+  // pub fn files(&self) -> Vec<PathBuf> {
+  //   let result: Vec<PathBuf> = self.all_files().into_iter().filter(|p| p.exists()).collect();
+  //   info!("detect mod {:?}: {:?}", self.1.join("."), result.iter().map(|p| p.display()).collect::<Vec<_>>());
+  //   result
+  // }
+
+  pub fn from_path(path: &Path, root: &Path) -> Self {
+    let common_count = path.components().zip(root.components()).take_while(|(a, b)| a == b).count();
+    let mut modpath = path.components().skip(common_count).map(|s| s.as_os_str().to_string_lossy().to_string()).collect::<Vec<_>>();
+    if let Some(mut filename) = modpath.pop() {
+      if filename == "lib.scala" {}
+      if filename == "main.scala" && modpath.is_empty() {}
+      else if filename.ends_with(".scala") {
+        filename.truncate(filename.len() - ".scala".len());
+        modpath.push(filename)
+      } else {
+        modpath.push(filename)
+      }
+    }
+    let rel = root.components().count() - common_count;
+    Self(if rel == 0 { Prefix::Absolute } else { Prefix::Relative(rel) }, modpath)
+  }
+
+  pub fn transform(mut self, base: &Self) -> Result<Self, &'static str> {
+    Ok(match self.0 {
+      Prefix::Root(_) | Prefix::Absolute => self,
+      Prefix::Relative(n) => {
+        let mut new_path = base.1.clone();
+        if new_path.len() >= n {
+          new_path.truncate(new_path.len() - n);
+          new_path.append(&mut self.1);
+          Self(base.0.clone(), new_path)
+        } else {
+          let prefix = match base.0 {
+            // fixme: is cross root supported?
+            Prefix::Root(_) | Prefix::Absolute => return Err("mod transform out of absolute"),
+            Prefix::Relative(n2) => Prefix::Relative(n2 + n - new_path.len()),
+          };
+          Self(prefix, self.1)
+        }
+      }
+    })
+  }
+
+  fn show(&self) -> String {
+    self.1.join(".")
+  }
+
+  fn is_empty(&self) -> bool {
+    self.1.is_empty()
+  }
+}
 impl std::str::FromStr for Mod {
   type Err = &'static str;
   fn from_str(s: &str) -> Result<Self, Self::Err> {
-    if s.is_empty() {
-      return Err("empty string")
-    }
-    let mut mods = vec![];
-    let is_bin = match s {
-      "bin" => true,
-      "lib" => false,
-      _ => {
-        mods = s.split('.').map(|s| s.to_string()).collect();
-        false
-      }
+    let mut split = s.split(".");
+    let prefix_str = split.next().unwrap();
+    let prefix = match prefix_str {
+      "%" => Prefix::Absolute,
+      "%%" => Prefix::Relative(0),
+      s if s.starts_with("%^") && s.trim_end_matches('^') == "%" => {
+        Prefix::Relative(s.len() - 1)
+      },
+      s if !s.starts_with('%') => Prefix::Root(s.to_string()),
+      _ => return Err("unknown %")
     };
-    Ok(Self(mods, is_bin))
-  }
-}
-impl Mod {
-  fn all_files(&self) -> Vec<PathBuf> {
-    // TODO: iterator
-    let path_str = self.0.join("/");
-    if self.0.is_empty() {
-      vec![ format!("src/{}.scala", if self.1 {"main"} else { "lib" }).into() ]
-    } else {
-      vec![ format!("src/{}.scala", path_str).into(), format!("src/{}/lib.scala", path_str).into() ]
-    }
-  }
-
-  pub fn files(&self) -> Vec<PathBuf> {
-    let result: Vec<PathBuf> = self.all_files().into_iter().filter(|p| p.exists()).collect();
-    info!("detect mod {:?}: {:?}", self.0.join("."), result.iter().map(|p| p.display()).collect::<Vec<_>>());
-    result
-  }
-  pub fn is_empty(&self) -> bool { self.0.is_empty() }
-  pub fn push(&mut self, s: String) { self.0.push(s) }
-  pub fn concat(mut self, other: Mod) -> Self { self.0.extend(other.0); self }
-  /// % means `crate`
-  /// %% means `self`
-  /// %^ means `super`
-  /// %^^...^ means `super::super::...::super`
-  pub fn transform(mut self, prefix: &Self) -> Result<Self, failure::Error> {
-    match self.0.first() {
-      Some(s) if s == "%" => self.0[0] = "src".to_string(),
-      Some(s) if s == "%%" => self.0 = prefix.0.clone().into_iter().chain(self.0.into_iter().skip(1)).collect(),
-      Some(s) if s.starts_with("%^") && s.trim_end_matches('^') == "%" => {
-        let depth = s.len() - 1;
-        if prefix.0.len() < depth {
-          return Err(failure::err_msg(format!("parent {:?} depth out of range {}", prefix, depth)));
-        }
-        self.0 = prefix.0.iter().rev().skip(depth).rev().cloned().chain(self.0.into_iter().skip(1)).collect();
-      },
-      Some(s) if s.starts_with('%') => {
-        return Err(failure::err_msg(format!("unknown percent {}", s)))
-      },
-      _ => (),
-    }
-    Ok(self)
-  }
-  pub fn show(&self) -> String {
-    self.0.join(".")
+    Ok(Self(prefix, split.map(|i| i.to_string()).collect()))
   }
 }
 
-#[derive(Debug)]
-struct Imports(Mod, Vec<Imports>);
-// TODO support underscore and alias
-impl Imports {
-  pub fn new() -> Self {
-    Imports(Mod(vec![], false), vec![])
-  }
-  pub fn from_str<S: Iterator<Item=char>>(s: &mut S, root: bool) -> Result<Vec<Imports>, failure::Error> {
-    let mut result = Vec::new();
-    let mut current = Self::new(); // a.b. {/**/} # except [, }] here
-    let mut end_current = false;
-    let mut ident = String::new();
-    while let Some(c) = s.next() {
-      match c {
-        '%' if root && current.0.is_empty() => { ident.push(c) },
-        '%' => return Err(failure::err_msg("symbols % in the middle")),
-        ' ' | '\t' | '\n' | '\r' => (),
-        ',' => {
-          current.0.push(std::mem::replace(&mut ident, String::new()));
-          result.push(std::mem::replace(&mut current, Self::new()));
-          end_current = false;
-        },
-        '}' if !root => {
-          current.0.push(std::mem::replace(&mut ident, String::new()));
-          result.push(std::mem::replace(&mut current, Self::new()));
-          break
-        },
-        '}' if root => return Err(failure::err_msg("trailing '}'")),
-        _ if end_current => return Err(failure::err_msg("symbols after end_current")),
-        '{' => {
-          let still_root = root && current.0.is_empty();
-          current.1 = Imports::from_str(s, still_root)?;
-          end_current = true;
-        },
-        '.' => {
-          current.0.push(std::mem::replace(&mut ident, String::new()))
-        },
-        _ => ident.push(c),
-      }
-    }
-    if root {
-      result.push(std::mem::replace(&mut current, Self::new()));
-    }
-    trace!("parse imports: {} {:?} {:?} {} {:?}", root, result, current, end_current, ident);
-    Ok(result)
-  }
-
-  fn normalize(mut self, current: &Mod) -> Result<Self, failure::Error> {
-    if self.0.is_empty() {
-      self.1 = self.1.into_iter().map(|i| i.normalize(current)).collect::<Result<_, _>>()?
-    } else {
-      self.0 = self.0.transform(current)?;
-    }
-    Ok(self)
-  }
-
-  fn mods(&self) -> Vec<Mod> {
-    let mut result = Vec::new();
-    if self.1.is_empty() {
-      return vec![self.0.clone()]
-    }
-    for i in &self.1 {
-      trace!("for_mods {:?}",i);
-      for j in i.mods() {
-        result.push(self.0.clone().concat(j))
-      }
-      trace!("result: {:?}", result);
-    }
-    result
-  }
-
-  fn display_inner(&self, mut root: bool) -> String {
-    let mut s = self.0.show();
-    if !self.0.is_empty() && !self.1.is_empty() {
-      s.push('.');
-    }
-    if !self.0.is_empty() {
-      root = false
-    }
-    if !self.1.is_empty() {
-      if self.1.len() > 1 { s.push('{') }
-      s += &self.1.iter().map(|i| i.display_inner(root)).collect::<Vec<_>>().join(", ");
-      if self.1.len() > 1 { s.push('}') }
-    }
-    s
-  }
-  #[allow(dead_code)]
-  fn display(&self, root: &str) -> String {
-    format!("{}.{}", root, self.display_inner(true))
-  }
-}
-impl std::str::FromStr for Imports {
-  type Err = failure::Error;
-  fn from_str(s: &str) -> Result<Self, Self::Err> {
-    let mut s = s.chars();
-    let result = Imports::from_str(&mut s, true)?;
-    trace!("parse Imports: {:?}", result);
-    if s.count() == 0 {
-      Ok(Imports(Mod(vec![], false), result))
-    } else {
-      Err(failure::err_msg("remain"))
-    }
-  }
-}
-
-fn preprocess(mods: &mut HashMap<Mod, Vec<PathBuf>>, current: Mod, root_prefix: &str) -> Result<(), failure::Error> {
+fn preprocess(mods: &mut BTreeMap<Mod, Vec<PathBuf>>, pattern: &str, root: &Path, crate_name: &str) -> Result<(), failure::Error> {
   use std::io::Write;
-  let mut queue = Vec::<Mod>::new();
-  for path in current.files() {
-    let mut actual_current = current.clone();
+  for path in glob::glob(pattern).context("pattern not valid")?.filter_map(|i| i.ok()) {
+    let current = Mod::from_path(&path, root);
     // let current = ();
     if let Some(content) = utils::load_content(&path)? {
       let out_path = target_dir().join(&path);
       std::fs::create_dir_all(out_path.parent().expect("parent"))?;
       let mut fout = std::fs::File::create(&out_path)?;
       info!("transform: {} => {}", path.display(), out_path.display());
+      let mut multicomments = false;
+      let mut processed = false;
       for line in content.lines() {
         let ln = line.trim();
-        if ln.is_empty() || ln.starts_with("//") { }
-        if ln.starts_with("package") {
+        if processed {}
+        else if multicomments {
+          if ln.ends_with("*/") {
+            multicomments = false
+          }
+        } else if ln.is_empty() || ln.starts_with("//") {
+          ()
+        } else if ln.starts_with("/*") {
+          if ln.ends_with("*/") && ln.len() > 3 {
+            multicomments = true
+          }
+        } else if ln.starts_with("package") {
           let package = ln["package".len()..].trim().trim_end_matches(';');
           if package.starts_with('%') {
-            actual_current = package.parse::<Mod>().map_err(failure::err_msg)?.transform(&actual_current)?;
+            let actual_current = package.parse::<Mod>().map_err(failure::err_msg)?.transform(&current).map_err(failure::err_msg)?;
             debug!("current: {:?} => {:?}", current.show(), actual_current.show());
-            let current_str = format!("{}{}{}", root_prefix, if actual_current.is_empty() { "" } else { "." }, actual_current.show());
+            let current_str = format!("{}.{}{}{}", PACKAGE_PREFIX, crate_name, if actual_current.is_empty() { "" } else { "." }, actual_current.show());
             write!(fout, "package {};", current_str)?; // TODO _root_
-            let mut sp = root_prefix.rsplitn(2, '.');
-            let name = sp.next().unwrap();
-            let root = sp.next().unwrap_or("_root_");
-            write!(fout, "  import {}.{{{} => %}};", root, name)?;
+            write!(fout, " import {}.{{{} => %}};", PACKAGE_PREFIX, crate_name)?;
             let mut sp = current_str.rsplitn(2, '.');
             let name = sp.next().unwrap();
             let root = sp.next().unwrap_or("_root_");
-            writeln!(fout, "  import {}.{{{} => %%}};", root, name)?;
-            continue;
-          }
-        } else if ln.starts_with("import") {
-          debug!("parsing line: {}", ln);
-          let imports = ln["import".len()..].trim().trim_end_matches(';');
-          if imports.starts_with('%') {
-            let imports = imports.parse::<Imports>()?.normalize(&actual_current)?;
-            let new_mods = imports.mods();
-            debug!("found mod: {:?}", &new_mods);
-            queue.extend(new_mods);
-            // writeln!(fout, "import {};", imports.display(root_prefix))?; // TODO _root_
-            // continue;
+            writeln!(fout, " import {}.{{{} => %%}};", root, name)?;
+            mods.entry(actual_current).or_default().push(path.clone());
+            processed = true;
+            continue
           }
         }
         writeln!(fout, "{}", line)?;
       }
-      mods.entry(actual_current).or_default().push(path.clone());
-    }
-  }
-  for c in queue {
-    if !mods.contains_key(&c) {
-      preprocess(mods, c, root_prefix)?
     }
   }
   Ok(())
 }
 
-fn detect_start() -> Mod {
-  if Path::new("src/main.scala").exists() {
-    "bin".parse().unwrap()
-  } else {
-    "lib".parse().unwrap()
-  }
-}
-
 pub fn main(opts: Opts, config: &PackageConfig) -> Result<(), failure::Error> {
-  let root_prefix = format!("{}.{}", PACKAGE_PREFIX, config.package.name);
-  let root = opts.start.map(|s| s.parse::<Mod>().map_err(failure::err_msg)).transpose()?.unwrap_or_else(detect_start);
-  let mut mods = HashMap::new();
-  preprocess(&mut mods, root, &root_prefix)?;
+  let src_root = opts.src_root.clone().unwrap_or_else(|| opts.include.split('/').take_while(|s| !s.contains('*')).collect::<Vec<_>>().join("/"));
+  let mut mods = BTreeMap::new();
+  preprocess(&mut mods, &opts.include, src_root.as_ref(), &config.package.name)?;
   let mods = mods.iter().map(|(i, v)| (i.show(), v)).collect::<BTreeMap<_,_>>();
   let mods_str = serde_json::to_string_pretty(&mods)?;
   let paths_str = mods.values().flat_map(|i| i.iter()).map(|i| target_dir().join(i).display().to_string()).collect::<Vec<_>>().join("\n");

@@ -1,5 +1,4 @@
 package %%;
-import %%.{a, b};
 import a._;
 
 class M {}
