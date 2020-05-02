@@ -95,7 +95,7 @@ impl Mod {
 impl std::str::FromStr for Mod {
   type Err = &'static str;
   fn from_str(s: &str) -> Result<Self, Self::Err> {
-    let mut split = s.split(".");
+    let mut split = s.split('.');
     let prefix_str = split.next().unwrap();
     let prefix = match prefix_str {
       "%" => Prefix::Absolute,
@@ -107,6 +107,16 @@ impl std::str::FromStr for Mod {
       _ => return Err("unknown %")
     };
     Ok(Self(prefix, split.map(|i| i.to_string()).collect()))
+  }
+}
+impl ToString for Prefix {
+  fn to_string(&self) -> String {
+    match self {
+      Prefix::Absolute => "%".to_string(),
+      Prefix::Relative(0) => "%%".to_string(),
+      Prefix::Relative(n) => format!("%{}", "^".repeat(*n)),
+      Prefix::Root(s) => s.clone(),
+    }
   }
 }
 
@@ -130,7 +140,6 @@ fn preprocess(mods: &mut BTreeMap<Mod, Vec<PathBuf>>, pattern: &str, root: &Path
             multicomments = false
           }
         } else if ln.is_empty() || ln.starts_with("//") {
-          ()
         } else if ln.starts_with("/*") {
           if ln.ends_with("*/") && ln.len() > 3 {
             multicomments = true
@@ -142,11 +151,19 @@ fn preprocess(mods: &mut BTreeMap<Mod, Vec<PathBuf>>, pattern: &str, root: &Path
             debug!("current: {:?} => {:?}", current.show(), actual_current.show());
             let current_str = format!("{}.{}{}{}", PACKAGE_PREFIX, crate_name, if actual_current.is_empty() { "" } else { "." }, actual_current.show());
             write!(fout, "package {};", current_str)?; // TODO _root_
+            // write!(fout, " import _root_.{{{} => %:}};", PACKAGE_PREFIX)?;
             write!(fout, " import {}.{{{} => %}};", PACKAGE_PREFIX, crate_name)?;
-            let mut sp = current_str.rsplitn(2, '.');
-            let name = sp.next().unwrap();
-            let root = sp.next().unwrap_or("_root_");
-            writeln!(fout, " import {}.{{{} => %%}};", root, name)?;
+
+            let len = actual_current.1.len();
+            write!(fout, "import {}.{{{} => {}}};", PACKAGE_PREFIX, crate_name, Prefix::Relative(len).to_string())?;
+            for i in 0..len {
+              write!(fout, "import %{}{}.{{{} => {}}};",
+                if i == 0 {""} else {"."},
+                actual_current.1[..i].join("."),
+                actual_current.1[i],
+                Prefix::Relative(len-i-1).to_string())?;
+            }
+            writeln!(fout, "")?;
             mods.entry(actual_current).or_default().push(path.clone());
             processed = true;
             continue
