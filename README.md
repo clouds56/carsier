@@ -57,9 +57,11 @@ Features
         * `os = { conflict = ture, group = [ 'macos', 'unix', 'linux', 'windows' ] }`
         * `target = { conflict = true, group = [ 'x86_64', 'x86' ] }`
     * virtual features would be set iff all conditions in group met
-        * `virtual　= { virtual = true, group = [ 'a', 'b', 'c|d', '!(a|c)&d' ] }`
-    * files would be automacitally select by feature
-        * `filename[feature1,feature2].scala`
+        * `virtual = { virtual = true, group = [ 'a', 'b', 'c|d', '!(a|c)&d' ] }`
+        * logic operators `!`, `|`, `&`
+        * compare operators (only for version now) `<`, `<=`, `>`, `>=`, `=`, `!=`
+    * files would be automacitally select by feature (TODO)
+        * `filename-feature1-feature2.scala`
         * all file would be included iff all conditions in group met
 
 Cli

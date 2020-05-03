@@ -64,9 +64,9 @@ pub struct Feature {
 }
 
 pub struct Target {
-  name: TargetName,
-  profile: Profile,
-  features: BTreeMap<String, Rc<Feature>>,
+  pub name: TargetName,
+  pub profile: Profile,
+  pub features: BTreeMap<String, Rc<Feature>>,
 }
 
 fn get_target(opts: &Opts, _config: &PackageConfig) -> Result<Vec<Target>, failure::Error> {
@@ -109,8 +109,10 @@ pub fn main(opts: Opts, config: &PackageConfig) -> Result<(), failure::Error> {
   let targets = get_target(&opts, &config).context("parse target failed")?;
   resolve::main(opts.resolve, config).context("resolve failed")?;
   preprocess::main(opts.preprocess, config).context("preprocess failed")?;
+  let units: BTreeMap<String, Vec<preprocess::Unit>> = serde_json::from_reader(std::fs::File::open("target/mods.json").context("open mods.json")?).context("read mods.json")?;
   for target in targets {
-    compile(target, "@target/deps.classpath", "@target/src_files")?;
+    let units_file = preprocess::src_files(&target, &units).context("gen src_files")?;
+    compile(target, "@target/deps.classpath", &format!("@target/src_files/{}", units_file))?;
   }
   Ok(())
 }

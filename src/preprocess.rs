@@ -1,6 +1,8 @@
+use std::collections::BTreeSet;
 use crate::config::PackageConfig;
 use crate::utils;
 use crate::config::constant::*;
+use crate::build::Target;
 use failure::ResultExt;
 
 use std::collections::BTreeMap;
@@ -18,10 +20,16 @@ pub struct Opts {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Prefix {
-  Relative(usize), Absolute, Root(String),
+  Relative(usize), Absolute, Root(String), EntryPoint(String),
 }
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Mod(Prefix, Vec<String>);
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Unit {
+  path: PathBuf,
+  features: BTreeSet<String>,
+}
 
 impl Mod {
   // fn src_file(s: &str) -> PathBuf {
@@ -46,21 +54,28 @@ impl Mod {
   //   result
   // }
 
-  pub fn from_path(path: &Path, root: &Path) -> Self {
+  pub fn from_path(path: &Path, root: &Path) -> (Self, BTreeSet<String>) {
+    let mut features = BTreeSet::new();
     let common_count = path.components().zip(root.components()).take_while(|(a, b)| a == b).count();
     let mut modpath = path.components().skip(common_count).map(|s| s.as_os_str().to_string_lossy().to_string()).collect::<Vec<_>>();
+    let mut prefix = match root.components().count() - common_count {
+      0 => Prefix::Absolute,
+      n => Prefix::Relative(n),
+    };
     if let Some(mut filename) = modpath.pop() {
-      if filename == "lib.scala" {}
-      else if filename == "main.scala" && modpath.is_empty() {}
-      else if filename.ends_with(".scala") {
+      if filename.ends_with(".scala") {
         filename.truncate(filename.len() - ".scala".len());
-        modpath.push(filename)
-      } else {
+      }
+      let mut sp = filename.split('-').map(|s| s.to_string());
+      let filename = sp.next().unwrap();
+      features.append(&mut sp.collect());
+      if (filename == "lib" || filename == "main") && modpath.is_empty() {
+        prefix = Prefix::EntryPoint(filename.to_string())
+      } else if filename != "lib" {
         modpath.push(filename)
       }
     }
-    let rel = root.components().count() - common_count;
-    Self(if rel == 0 { Prefix::Absolute } else { Prefix::Relative(rel) }, modpath)
+    (Self(prefix, modpath), features)
   }
 
   pub fn transform(mut self, base: &Self) -> Result<Self, &'static str> {
@@ -75,17 +90,22 @@ impl Mod {
         } else {
           let prefix = match base.0 {
             // fixme: is cross root supported?
-            Prefix::Root(_) | Prefix::Absolute => return Err("mod transform out of absolute"),
+            Prefix::Root(_) | Prefix::Absolute | Prefix::EntryPoint(_) => return Err("mod transform out of absolute"),
             Prefix::Relative(n2) => Prefix::Relative(n2 + n - new_path.len()),
           };
           Self(prefix, self.1)
         }
       }
+
+      Prefix::EntryPoint(_) => unreachable!("from str should never be entrypoint")
     })
   }
 
-  fn show(&self) -> String {
+  fn path(&self) -> String {
     self.1.join(".")
+  }
+  fn show(&self) -> String {
+    format!("{}.{}", self.0.to_string(), self.1.join("."))
   }
 
   fn is_empty(&self) -> bool {
@@ -112,6 +132,7 @@ impl std::str::FromStr for Mod {
 impl ToString for Prefix {
   fn to_string(&self) -> String {
     match self {
+      Prefix::EntryPoint(s) => format!("@{}", s),
       Prefix::Absolute => "%".to_string(),
       Prefix::Relative(0) => "%%".to_string(),
       Prefix::Relative(n) => format!("%{}", "^".repeat(*n)),
@@ -120,10 +141,10 @@ impl ToString for Prefix {
   }
 }
 
-fn preprocess(mods: &mut BTreeMap<Mod, Vec<PathBuf>>, pattern: &str, root: &Path, crate_name: &str, registry_name: &str) -> Result<(), failure::Error> {
+fn preprocess(mods: &mut BTreeMap<Mod, Vec<Unit>>, pattern: &str, root: &Path, crate_name: &str, registry_name: &str) -> Result<(), failure::Error> {
   use std::io::Write;
   for path in glob::glob(pattern).context("pattern not valid")?.filter_map(|i| i.ok()) {
-    let current = Mod::from_path(&path, root);
+    let (current, features) = Mod::from_path(&path, root);
     // let current = ();
     if let Some(content) = utils::load_content(&path)? {
       let out_path = target_dir().join(&path);
@@ -131,10 +152,10 @@ fn preprocess(mods: &mut BTreeMap<Mod, Vec<PathBuf>>, pattern: &str, root: &Path
       let mut fout = std::fs::File::create(&out_path)?;
       info!("transform: {} => {}", path.display(), out_path.display());
       let mut multicomments = false;
-      let mut processed = false;
+      let mut actual_current = None;
       for line in content.lines() {
         let ln = line.trim();
-        if processed {}
+        if actual_current.is_some() {}
         else if multicomments {
           if ln.ends_with("*/") {
             multicomments = false
@@ -146,10 +167,10 @@ fn preprocess(mods: &mut BTreeMap<Mod, Vec<PathBuf>>, pattern: &str, root: &Path
           }
         } else if ln.starts_with("package") {
           let package = ln["package".len()..].trim().trim_end_matches(';');
-          if package.starts_with('%') {
+          actual_current = if package.starts_with('%') {
             let actual_current = package.parse::<Mod>().map_err(failure::err_msg)?.transform(&current).map_err(failure::err_msg)?;
             debug!("current: {:?} => {:?}", current.show(), actual_current.show());
-            let current_str = format!("{}.{}{}{}", registry_name, crate_name, if actual_current.is_empty() { "" } else { "." }, actual_current.show());
+            let current_str = format!("{}.{}{}{}", registry_name, crate_name, if actual_current.is_empty() { "" } else { "." }, actual_current.path());
             write!(fout, "package {};", current_str)?; // TODO _root_
             // write!(fout, " import _root_.{{{} => %:}};", PACKAGE_PREFIX)?;
             write!(fout, " import {}.{{{} => %}};", registry_name, crate_name)?;
@@ -164,12 +185,17 @@ fn preprocess(mods: &mut BTreeMap<Mod, Vec<PathBuf>>, pattern: &str, root: &Path
                 Prefix::Relative(len-i-1).to_string())?;
             }
             writeln!(fout, "")?;
-            mods.entry(actual_current).or_default().push(path.clone());
-            processed = true;
-            continue
-          }
+            Some(actual_current)
+          } else {
+            writeln!(fout, "{}", line)?;
+            Some(package.parse::<Mod>().map_err(failure::err_msg)?)
+          };
+          continue
         }
         writeln!(fout, "{}", line)?;
+      }
+      if let Some(current) = actual_current {
+        mods.entry(current).or_default().push(Unit{ path, features });
       }
     }
   }
@@ -182,8 +208,18 @@ pub fn main(opts: Opts, config: &PackageConfig) -> Result<(), failure::Error> {
   preprocess(&mut mods, &opts.include, src_root.as_ref(), &config.package.name, &config.package.registry)?;
   let mods = mods.iter().map(|(i, v)| (i.show(), v)).collect::<BTreeMap<_,_>>();
   let mods_str = serde_json::to_string_pretty(&mods)?;
-  let paths_str = mods.values().flat_map(|i| i.iter()).map(|i| target_dir().join(i).display().to_string()).collect::<Vec<_>>().join("\n");
   let _ = utils::compare_and_write(target_dir().join("mods.json"), mods_str.as_bytes())?;
-  let _ = utils::compare_and_write(target_dir().join("src_files"), paths_str.as_bytes())?;
   Ok(())
+}
+
+pub fn src_files(target: &Target, units: &BTreeMap<String, Vec<Unit>>) -> Result<String, failure::Error> {
+  let base = target.name.to_string();
+  let features = target.features.keys().cloned().collect::<BTreeSet<_>>();
+  let features_str = format!("{}{}", base, features.iter().map(|f| format!("-{}", f)).collect::<Vec<_>>().join(""));
+  let paths_str = units.iter().filter(|(s, _)| !s.starts_with('@'))
+    .flat_map(|(_, i)| i.iter()).filter(|i| i.features.is_empty() || !i.features.is_disjoint(&features))
+    .chain(units.get(&format!("@{}.", base)).ok_or_else(|| failure::err_msg("entrypoint not found"))?.iter())
+    .map(|i| target_dir().join(&i.path).display().to_string()).collect::<Vec<_>>().join("\n");
+  let _ = utils::compare_and_write(target_dir().join("src_files").join(&features_str), paths_str.as_bytes())?;
+  Ok(features_str)
 }

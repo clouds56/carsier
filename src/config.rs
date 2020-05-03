@@ -19,7 +19,9 @@ pub use version::VersionRange;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PackageConfig {
   pub package: Package,
-  pub dependencies: BTreeMap<String, DependencyLike>
+  pub dependencies: BTreeMap<String, DependencyLike>,
+  #[serde(default)]
+  pub features: BTreeMap<String, FeatureLike>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -72,6 +74,21 @@ impl From<VersionRange> for Dependency {
       others: Default::default(),
     }
   }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum FeatureLike {
+  Group(Vec<String>),
+  Full(Feature),
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Feature {
+  #[serde(default)]
+  pub conflict: bool,
+  #[serde(rename = "virtual", default)]
+  pub computed: bool,
+  pub group: Vec<String>,
 }
 
 pub type Version = String;

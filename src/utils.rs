@@ -90,6 +90,9 @@ pub fn load_content<P: AsRef<Path>>(path: P) -> Result<Option<String>, failure::
 pub fn compare_and_write<P: AsRef<Path>>(path: P, content: &[u8]) -> Result<FileDep, failure::Error> {
   use std::io::prelude::*;
   use std::fs::*;
+  if let Some(parent) = path.as_ref().parent() {
+    std::fs::create_dir_all(parent)?;
+  }
   if let Some(old_content) = load_content_raw(&path)? {
     if old_content == content {
       return Ok(FileDep::Unchanged)
