@@ -19,15 +19,20 @@ Features
     ```
 2. Relative module system
     * implicit module name from file system
-    * import from relative `%` => root, `%%` => current, `%^` => parent, `%:` => crates
+        * `a/b/c.scala` => `a.b.c`
+        * `a/b/c/lib.scala` => `a.b.c`
+        * `a/b.c.scala` => `a.b.c` (TODO)
+    * import from relative
+        * `%` => root, `%%` => current, `%^` => parent
+        * `%:` => crates (TODO)
     * 2 ways to handle relative module
-    * preprocess (text based, must starts_with "import %")
-    * scala plugin (TODO)
+        * preprocess (text based, must starts_with "import %")
+        * scala plugin (TODO)
     ````scala
     /// it would automatically convert to
     /// ```scala
     /// package crates.crate_name.path.to.file;
-    /// import _root_.{crates => %:}
+    /// import _root_.{crates => %:}; // TODO
     /// import %:.{crate_name => %};
     /// import %:.crate_name.path.to.{file => %%};
     /// import %:.crate_name.path.{to => %^};
@@ -42,6 +47,20 @@ Features
     /// would have package name to `crates.crate_name.factory.users.extra`
     package %^.extra;
     ```
+3. target & features
+    * default target `lib`, `bin`, `examples`, `tests`
+        * `bin` expands to `bin_main`, detect `src/main.scala` by default
+        * `examples` expands to [`example_name`, ...], for `name` of files in `examples` folder
+        * `tests` expands to [`test_name`] for `name` in `test` folder
+    * features with `name` or `path.to.dep/name` could be selected
+    * there're special conflicting features `os` and `target`
+        * `os = { conflict = ture, group = [ 'macos', 'unix', 'linux', 'windows' ] }`
+        * `target = { conflict = true, group = [ 'x86_64', 'x86' ] }`
+    * virtual features would be set iff all conditions in group met
+        * `virtual　= { virtual = true, group = [ 'a', 'b', 'c|d', '!(a|c)&d' ] }`
+    * files would be automacitally select by feature
+        * `filename[feature1,feature2].scala`
+        * all file would be included iff all conditions in group met
 
 Cli
 ------

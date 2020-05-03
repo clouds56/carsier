@@ -32,7 +32,8 @@ pub fn main(opts: Opts, config: &PackageConfig) -> Result<(), failure::Error> {
   })?;
   let deps_out = String::from_utf8(deps_out)?;
   contd.exists_and_write(target_dir().join("deps.classpath"), || {
-    utils::call(coursier, vec!["fetch", "--quiet", "--classpath"].into_iter().chain(deps_out.lines())).map(|s| s.into())
+    utils::call(coursier, vec!["fetch", "--quiet", "--classpath"].into_iter().chain(deps_out.lines()))
+      .map(|s| format!("{:?}", s.trim_end_matches('\n')).into())
   })?;
   Ok(())
 }
