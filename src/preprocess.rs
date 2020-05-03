@@ -51,7 +51,7 @@ impl Mod {
     let mut modpath = path.components().skip(common_count).map(|s| s.as_os_str().to_string_lossy().to_string()).collect::<Vec<_>>();
     if let Some(mut filename) = modpath.pop() {
       if filename == "lib.scala" {}
-      if filename == "main.scala" && modpath.is_empty() {}
+      else if filename == "main.scala" && modpath.is_empty() {}
       else if filename.ends_with(".scala") {
         filename.truncate(filename.len() - ".scala".len());
         modpath.push(filename)
@@ -120,7 +120,7 @@ impl ToString for Prefix {
   }
 }
 
-fn preprocess(mods: &mut BTreeMap<Mod, Vec<PathBuf>>, pattern: &str, root: &Path, crate_name: &str) -> Result<(), failure::Error> {
+fn preprocess(mods: &mut BTreeMap<Mod, Vec<PathBuf>>, pattern: &str, root: &Path, crate_name: &str, registry_name: &str) -> Result<(), failure::Error> {
   use std::io::Write;
   for path in glob::glob(pattern).context("pattern not valid")?.filter_map(|i| i.ok()) {
     let current = Mod::from_path(&path, root);
@@ -149,13 +149,13 @@ fn preprocess(mods: &mut BTreeMap<Mod, Vec<PathBuf>>, pattern: &str, root: &Path
           if package.starts_with('%') {
             let actual_current = package.parse::<Mod>().map_err(failure::err_msg)?.transform(&current).map_err(failure::err_msg)?;
             debug!("current: {:?} => {:?}", current.show(), actual_current.show());
-            let current_str = format!("{}.{}{}{}", PACKAGE_PREFIX, crate_name, if actual_current.is_empty() { "" } else { "." }, actual_current.show());
+            let current_str = format!("{}.{}{}{}", registry_name, crate_name, if actual_current.is_empty() { "" } else { "." }, actual_current.show());
             write!(fout, "package {};", current_str)?; // TODO _root_
             // write!(fout, " import _root_.{{{} => %:}};", PACKAGE_PREFIX)?;
-            write!(fout, " import {}.{{{} => %}};", PACKAGE_PREFIX, crate_name)?;
+            write!(fout, " import {}.{{{} => %}};", registry_name, crate_name)?;
 
             let len = actual_current.1.len();
-            write!(fout, "import {}.{{{} => {}}};", PACKAGE_PREFIX, crate_name, Prefix::Relative(len).to_string())?;
+            write!(fout, "import {}.{{{} => {}}};", registry_name, crate_name, Prefix::Relative(len).to_string())?;
             for i in 0..len {
               write!(fout, "import %{}{}.{{{} => {}}};",
                 if i == 0 {""} else {"."},
@@ -179,7 +179,7 @@ fn preprocess(mods: &mut BTreeMap<Mod, Vec<PathBuf>>, pattern: &str, root: &Path
 pub fn main(opts: Opts, config: &PackageConfig) -> Result<(), failure::Error> {
   let src_root = opts.src_root.clone().unwrap_or_else(|| opts.include.split('/').take_while(|s| !s.contains('*')).collect::<Vec<_>>().join("/"));
   let mut mods = BTreeMap::new();
-  preprocess(&mut mods, &opts.include, src_root.as_ref(), &config.package.name)?;
+  preprocess(&mut mods, &opts.include, src_root.as_ref(), &config.package.name, &config.package.registry)?;
   let mods = mods.iter().map(|(i, v)| (i.show(), v)).collect::<BTreeMap<_,_>>();
   let mods_str = serde_json::to_string_pretty(&mods)?;
   let paths_str = mods.values().flat_map(|i| i.iter()).map(|i| target_dir().join(i).display().to_string()).collect::<Vec<_>>().join("\n");

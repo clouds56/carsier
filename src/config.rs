@@ -29,6 +29,8 @@ pub struct Package {
   #[serde(default)]
   pub authors: Vec<String>,
   pub edition: String,
+  #[serde(default = "constant::default_registry")]
+  pub registry: String,
   #[serde(flatten)]
   pub others: BTreeMap<String, String>,
 }

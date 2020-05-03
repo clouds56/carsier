@@ -1,6 +1,6 @@
 pub const NAME: &str = "carsier";
 
-pub const PACKAGE_PREFIX: &str = "crates";
+pub const REGISTRY: &str = "crates";
 
 pub const SCALA_VERSION: &str = "2.13";
 
@@ -25,4 +25,8 @@ pub fn toml_name() -> String {
 
 pub fn target_dir() -> std::path::PathBuf {
   std::path::Path::new("target").to_owned()
+}
+
+pub fn default_registry() -> String {
+  REGISTRY.to_string()
 }
