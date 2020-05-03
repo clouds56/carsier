@@ -3,7 +3,7 @@
 use std::rc::Rc;
 use std::collections::BTreeMap;
 use std::path::Path;
-use failure::ResultExt;
+use anyhow::Context;
 use crate::config::PackageConfig;
 use crate::{resolve, preprocess};
 use crate::utils;
@@ -69,7 +69,7 @@ pub struct Target {
   pub features: BTreeMap<String, Rc<Feature>>,
 }
 
-fn get_target(opts: &Opts, _config: &PackageConfig) -> Result<Vec<Target>, failure::Error> {
+fn get_target(opts: &Opts, _config: &PackageConfig) -> Result<Vec<Target>, anyhow::Error> {
   let mut names = Vec::new();
   if Path::new("src/lib.scala").exists() {
     names.push(TargetName::Lib)
@@ -78,7 +78,7 @@ fn get_target(opts: &Opts, _config: &PackageConfig) -> Result<Vec<Target>, failu
     names.push(TargetName::BinMain)
   }
   if names.is_empty() {
-    return Err(failure::err_msg("no target found"))
+    return Err(anyhow::Error::msg("no target found"))
   }
   let targets = names.into_iter().map(|name| Target {
     name,
@@ -88,7 +88,7 @@ fn get_target(opts: &Opts, _config: &PackageConfig) -> Result<Vec<Target>, failu
   Ok(targets)
 }
 
-fn compile(target: Target, cp: &str, files: &str) -> Result<std::path::PathBuf, failure::Error> {
+fn compile(target: Target, cp: &str, files: &str) -> Result<std::path::PathBuf, anyhow::Error> {
   let target_name = target.name.to_string();
   let target = target_dir().join("build").join(&target_name).with_extension("jar");
   std::fs::create_dir_all(target.parent().unwrap())?;
@@ -105,7 +105,7 @@ fn compile(target: Target, cp: &str, files: &str) -> Result<std::path::PathBuf, 
   Ok(target)
 }
 
-pub fn main(opts: Opts, config: &PackageConfig) -> Result<(), failure::Error> {
+pub fn main(opts: Opts, config: &PackageConfig) -> Result<(), anyhow::Error> {
   let targets = get_target(&opts, &config).context("parse target failed")?;
   resolve::main(opts.resolve, config).context("resolve failed")?;
   preprocess::main(opts.preprocess, config).context("preprocess failed")?;

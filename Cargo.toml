@@ -9,7 +9,8 @@ edition = "2018"
 [dependencies]
 log = "*"
 simplelog = "*"
-failure = "*"
+thiserror = "*"
+anyhow = "*"
 glob = "*"
 clap = { git = "https://github.com/clap-rs/clap" } # for 3.0.0-beta.1
 toml = "*"

@@ -45,7 +45,7 @@ fn get_author_from_git() -> Option<String> {
   format!("{} <{}>", username.trim(), email.trim()).into()
 }
 
-fn init_git() -> Result<(), failure::Error> {
+fn init_git() -> Result<(), anyhow::Error> {
   if utils::call("git", &["rev-parse"]).is_err() {
     utils::call("git", &["init"])?;
   }
@@ -60,10 +60,10 @@ pub fn build_template(name: &str, edition: &str) -> String {
     .replace("<edition>", edition)
 }
 
-pub fn main(opts: Opts) -> Result<(), failure::Error> {
+pub fn main(opts: Opts) -> Result<(), anyhow::Error> {
   let name = match opts.name {
     Some(name) => name,
-    None => std::env::current_dir()?.file_name().ok_or_else(|| failure::err_msg("current dir is root"))?.to_string_lossy().to_string(),
+    None => std::env::current_dir()?.file_name().ok_or_else(|| anyhow::Error::msg("current dir is root"))?.to_string_lossy().to_string(),
   };
   info!("init project {}", name);
   let mut toml_file = OpenOptions::new().write(true).create_new(true).open(toml_name())?;

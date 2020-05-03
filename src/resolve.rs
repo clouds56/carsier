@@ -8,7 +8,7 @@ pub struct Opts {
   pub coursier: String,
 }
 
-fn dump_deps_in(config: &PackageConfig) -> Result<String, failure::Error> {
+fn dump_deps_in(config: &PackageConfig) -> Result<String, anyhow::Error> {
   let mut result = String::new();
   let edition = &config.package.edition;
   for (name, dep) in &config.dependencies {
@@ -16,14 +16,14 @@ fn dump_deps_in(config: &PackageConfig) -> Result<String, failure::Error> {
     let dep = dep.as_ref();
     if let Some(org) = &dep.org {
       let name = if dep.java { name.to_string() } else { format!("{}_{}", name, edition) };
-      let version = dep.version.as_coursier().ok_or_else(|| failure::err_msg("cannot find a version"))?;
+      let version = dep.version.as_coursier().ok_or_else(|| anyhow::Error::msg("cannot find a version"))?;
       result += &format!("{}:{}:{}\n", org, name, version);
     }
   }
   Ok(result)
 }
 
-pub fn main(opts: Opts, config: &PackageConfig) -> Result<(), failure::Error> {
+pub fn main(opts: Opts, config: &PackageConfig) -> Result<(), anyhow::Error> {
   let coursier = &opts.coursier;
   let deps_in = dump_deps_in(config)?;
   let mut contd = utils::compare_and_write(target_dir().join("deps.in"), deps_in.as_bytes())?;

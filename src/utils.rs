@@ -1,15 +1,41 @@
 use std::path::{Path, PathBuf};
+use thiserror::Error;
 
-#[derive(Debug, Fail)]
-#[fail(display = "call process {} failed with code {}", 0, 1)]
+pub trait ResultLog<T>: Sized {
+  fn ok_or_log(self, lvl: log::Level) -> Option<T>;
+  fn ok_or_warn(self) -> Option<T> {
+    self.ok_or_log(log::Level::Warn)
+  }
+  fn ok_or_error(self) -> Option<T> {
+    self.ok_or_log(log::Level::Error)
+  }
+}
+
+impl<T, E: std::fmt::Display> ResultLog<T> for Result<T, E> {
+  fn ok_or_log(self, lvl: log::Level) -> Option<T> {
+    match self {
+      Ok(t) => Some(t),
+      Err(e) => {
+        log!(lvl, "{}", e);
+        None
+      }
+    }
+  }
+}
+
+#[derive(Debug, Error)]
+#[error("call process {0} failed with code {1}: {}", self.output())]
 pub struct CallError(pub String, pub i32, pub std::process::Output);
 impl CallError {
   fn new<S: AsRef<str>>(s: S, i: std::process::Output) -> Self {
     Self(s.as_ref().to_string(), i.status.code().unwrap_or(-1), i)
   }
+  fn output(&self) -> String {
+    format!("{}{}", String::from_utf8_lossy(&self.2.stdout), String::from_utf8_lossy(&self.2.stderr))
+  }
 }
 
-pub fn call<Args, S1>(cmd: &str, args: Args) -> Result<String, failure::Error>
+pub fn call<Args, S1>(cmd: &str, args: Args) -> Result<String, anyhow::Error>
   where Args: IntoIterator<Item = S1>, S1: AsRef<std::ffi::OsStr> {
   use std::process::*;
   // TODO: encoding
@@ -48,7 +74,7 @@ impl FileDep {
   pub fn exists<P: AsRef<Path>>(self, path: P) -> Self {
     self.check(path.as_ref().exists())
   }
-  pub fn exists_and_write<P: AsRef<Path>, E: Into<failure::Error>, F: FnOnce()->Result<Vec<u8>, E>>(&mut self, path: P, f: F) -> Result<Vec<u8>, failure::Error> {
+  pub fn exists_and_write<P: AsRef<Path>, E: Into<anyhow::Error>, F: FnOnce()->Result<Vec<u8>, E>>(&mut self, path: P, f: F) -> Result<Vec<u8>, anyhow::Error> {
     let path = path.as_ref();
     let content = match self.exists(path) {
       FileDep::Touched => {
@@ -57,7 +83,7 @@ impl FileDep {
         content
       },
       FileDep::Unchanged => {
-        load_content_raw(&path)?.ok_or_else(|| failure::err_msg("open failed"))?
+        load_content_raw(&path)?.ok_or_else(|| anyhow::Error::msg("open failed"))?
       }
     };
     Ok(content)
@@ -71,7 +97,7 @@ impl FileDep {
   pub fn drop(self) {}
 }
 
-pub fn load_content_raw<P: AsRef<Path>>(path: P) -> Result<Option<Vec<u8>>, failure::Error> {
+pub fn load_content_raw<P: AsRef<Path>>(path: P) -> Result<Option<Vec<u8>>, anyhow::Error> {
   use std::io::prelude::*;
   if let Ok(mut f) = std::fs::File::open(&path) {
     let mut content = Vec::new();
@@ -80,14 +106,14 @@ pub fn load_content_raw<P: AsRef<Path>>(path: P) -> Result<Option<Vec<u8>>, fail
   }
   Ok(None)
 }
-pub fn load_content<P: AsRef<Path>>(path: P) -> Result<Option<String>, failure::Error> {
+pub fn load_content<P: AsRef<Path>>(path: P) -> Result<Option<String>, anyhow::Error> {
   if let Some(content) = load_content_raw(path)? {
     Ok(Some(String::from_utf8(content)?))
   } else {
     Ok(None)
   }
 }
-pub fn compare_and_write<P: AsRef<Path>>(path: P, content: &[u8]) -> Result<FileDep, failure::Error> {
+pub fn compare_and_write<P: AsRef<Path>>(path: P, content: &[u8]) -> Result<FileDep, anyhow::Error> {
   use std::io::prelude::*;
   use std::fs::*;
   if let Some(parent) = path.as_ref().parent() {
@@ -98,7 +124,7 @@ pub fn compare_and_write<P: AsRef<Path>>(path: P, content: &[u8]) -> Result<File
       return Ok(FileDep::Unchanged)
     }
   }
-  let lock_filename = path.as_ref().lock().ok_or_else(|| failure::err_msg("root path"))?;
+  let lock_filename = path.as_ref().lock().ok_or_else(|| anyhow::Error::msg("root path"))?;
   let mut f = OpenOptions::new().write(true).create_new(true).open(&lock_filename)?;
   f.write_all(content)?;
   std::fs::rename(&lock_filename, path)?;

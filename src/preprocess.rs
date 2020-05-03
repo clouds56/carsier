@@ -3,7 +3,7 @@ use crate::config::PackageConfig;
 use crate::utils;
 use crate::config::constant::*;
 use crate::build::Target;
-use failure::ResultExt;
+use anyhow::Context;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -141,7 +141,7 @@ impl ToString for Prefix {
   }
 }
 
-fn preprocess(mods: &mut BTreeMap<Mod, Vec<Unit>>, pattern: &str, root: &Path, crate_name: &str, registry_name: &str) -> Result<(), failure::Error> {
+fn preprocess(mods: &mut BTreeMap<Mod, Vec<Unit>>, pattern: &str, root: &Path, crate_name: &str, registry_name: &str) -> Result<(), anyhow::Error> {
   use std::io::Write;
   for path in glob::glob(pattern).context("pattern not valid")?.filter_map(|i| i.ok()) {
     let (current, features) = Mod::from_path(&path, root);
@@ -168,7 +168,7 @@ fn preprocess(mods: &mut BTreeMap<Mod, Vec<Unit>>, pattern: &str, root: &Path, c
         } else if ln.starts_with("package") {
           let package = ln["package".len()..].trim().trim_end_matches(';');
           actual_current = if package.starts_with('%') {
-            let actual_current = package.parse::<Mod>().map_err(failure::err_msg)?.transform(&current).map_err(failure::err_msg)?;
+            let actual_current = package.parse::<Mod>().map_err(anyhow::Error::msg)?.transform(&current).map_err(anyhow::Error::msg)?;
             debug!("current: {:?} => {:?}", current.show(), actual_current.show());
             let current_str = format!("{}.{}{}{}", registry_name, crate_name, if actual_current.is_empty() { "" } else { "." }, actual_current.path());
             write!(fout, "package {};", current_str)?; // TODO _root_
@@ -188,7 +188,7 @@ fn preprocess(mods: &mut BTreeMap<Mod, Vec<Unit>>, pattern: &str, root: &Path, c
             Some(actual_current)
           } else {
             writeln!(fout, "{}", line)?;
-            Some(package.parse::<Mod>().map_err(failure::err_msg)?)
+            Some(package.parse::<Mod>().map_err(anyhow::Error::msg)?)
           };
           continue
         }
@@ -202,7 +202,7 @@ fn preprocess(mods: &mut BTreeMap<Mod, Vec<Unit>>, pattern: &str, root: &Path, c
   Ok(())
 }
 
-pub fn main(opts: Opts, config: &PackageConfig) -> Result<(), failure::Error> {
+pub fn main(opts: Opts, config: &PackageConfig) -> Result<(), anyhow::Error> {
   let src_root = opts.src_root.clone().unwrap_or_else(|| opts.include.split('/').take_while(|s| !s.contains('*')).collect::<Vec<_>>().join("/"));
   let mut mods = BTreeMap::new();
   preprocess(&mut mods, &opts.include, src_root.as_ref(), &config.package.name, &config.package.registry)?;
@@ -212,13 +212,13 @@ pub fn main(opts: Opts, config: &PackageConfig) -> Result<(), failure::Error> {
   Ok(())
 }
 
-pub fn src_files(target: &Target, units: &BTreeMap<String, Vec<Unit>>) -> Result<String, failure::Error> {
+pub fn src_files(target: &Target, units: &BTreeMap<String, Vec<Unit>>) -> Result<String, anyhow::Error> {
   let base = target.name.to_string();
   let features = target.features.keys().cloned().collect::<BTreeSet<_>>();
   let features_str = format!("{}{}", base, features.iter().map(|f| format!("-{}", f)).collect::<Vec<_>>().join(""));
   let paths_str = units.iter().filter(|(s, _)| !s.starts_with('@'))
     .flat_map(|(_, i)| i.iter()).filter(|i| i.features.is_empty() || !i.features.is_disjoint(&features))
-    .chain(units.get(&format!("@{}.", base)).ok_or_else(|| failure::err_msg("entrypoint not found"))?.iter())
+    .chain(units.get(&format!("@{}.", base)).ok_or_else(|| anyhow::Error::msg("entrypoint not found"))?.iter())
     .map(|i| target_dir().join(&i.path).display().to_string()).collect::<Vec<_>>().join("\n");
   let _ = utils::compare_and_write(target_dir().join("src_files").join(&features_str), paths_str.as_bytes())?;
   Ok(features_str)

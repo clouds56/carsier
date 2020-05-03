@@ -1,5 +1,4 @@
 #[macro_use] extern crate log;
-#[macro_use] extern crate failure;
 #[macro_use] extern crate serde;
 #[macro_use] extern crate clap;
 extern crate semver_parser as semver;
@@ -15,6 +14,7 @@ mod preprocess;
 mod build;
 
 use config::{PackageConfig, repo::RepoConfig};
+use utils::ResultLog;
 
 #[derive(Clap)]
 pub struct Opts {
@@ -46,15 +46,15 @@ pub enum SubCommand {
   External(ExternelOpts),
 }
 
-pub fn load_repo_config<P: AsRef<Path>>(path: P) -> Result<RepoConfig, failure::Error> {
-  let toml_str = utils::load_content(path)?.ok_or_else(|| failure::err_msg("open repo_config file"))?;
+pub fn load_repo_config<P: AsRef<Path>>(path: P) -> Result<RepoConfig, anyhow::Error> {
+  let toml_str = utils::load_content(path)?.ok_or_else(|| anyhow::Error::msg("open repo_config file"))?;
   let config: RepoConfig = toml::from_str(&toml_str)?;
   dbg!(&config);
   Ok(config)
 }
 
-fn load_config<P: AsRef<Path>>(path: P) -> Result<PackageConfig, failure::Error> {
-  let toml_str = utils::load_content(path)?.ok_or_else(|| failure::err_msg("open config file"))?;
+fn load_config<P: AsRef<Path>>(path: P) -> Result<PackageConfig, anyhow::Error> {
+  let toml_str = utils::load_content(path)?.ok_or_else(|| anyhow::Error::msg("open config file"))?;
   let config: PackageConfig = toml::from_str(&toml_str)?;
   dbg!(&config);
   Ok(config)
@@ -69,6 +69,13 @@ fn init_logger(verbose: bool, path: Option<&Path>) {
       loggers.push(WriteLogger::new(LevelFilter::Info, Config::default(), file))
     }
   }
+  std::panic::set_hook(Box::new(|panic_info| {
+    if let Some(s) = panic_info.payload().downcast_ref::<anyhow::Error>() {
+      error!("panic occurred: {:?}", s);
+    } else {
+      error!("panic occurred: {}", panic_info);
+    }
+  }));
   CombinedLogger::init(loggers).unwrap();
 }
 
@@ -104,11 +111,11 @@ fn main() {
     SubCommand::Init(_) | SubCommand::New(_) | SubCommand::External(_) => unreachable!("already handled"),
     SubCommand::Resolve(opts) => {
       init_logger(verbose, Some("target/resolve.log".as_ref()));
-      resolve::main(opts, &config).unwrap();
+      resolve::main(opts, &config).ok_or_error();
     },
     SubCommand::Build(opts) => {
       init_logger(verbose, Some("target/build.log".as_ref()));
-      build::main(opts, &config).unwrap();
+      build::main(opts, &config).ok_or_error();
     }
   }
 }
