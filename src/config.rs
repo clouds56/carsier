@@ -22,6 +22,8 @@ pub struct PackageConfig {
   pub dependencies: BTreeMap<String, DependencyLike>,
   #[serde(default)]
   pub features: BTreeMap<String, FeatureLike>,
+  #[serde(default)]
+  pub resources: Vec<Resource>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -92,3 +94,8 @@ pub struct Feature {
 }
 
 pub type Version = String;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Resource {
+  pub include: String,
+}

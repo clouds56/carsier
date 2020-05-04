@@ -4,10 +4,9 @@ use std::rc::Rc;
 use std::collections::BTreeMap;
 use std::path::Path;
 use anyhow::Context;
-use crate::config::PackageConfig;
 use crate::{resolve, preprocess};
 use crate::utils;
-use crate::config::constant::*;
+use crate::config::{PackageConfig, Resource, constant::*};
 
 #[derive(Clap)]
 pub struct Opts {
@@ -105,6 +104,18 @@ fn compile(target: Target, cp: &str, files: &str) -> Result<std::path::PathBuf, 
   Ok(target)
 }
 
+fn package(target: &Path, resources: &Vec<Resource>) -> Result<(), anyhow::Error> {
+  let resource_files = resources.iter().map(|r| glob::glob(&r.include)).collect::<Result<Vec<_>, _>>()?
+    .into_iter().flat_map(|g| g.into_iter()).filter_map(|i| i.ok()).collect::<Vec<_>>();
+  if resource_files.is_empty() {
+    return Ok(())
+  }
+  let resource_str = resource_files.iter().map(|f| f.display().to_string()).collect::<Vec<_>>().join("\n");
+  let _ = utils::compare_and_write(target_dir().join("resources.txt"), resource_str.as_bytes())?;
+  utils::call("jar", vec!["--update".as_ref(), "--file".as_ref(), target.as_os_str(), "@target/resources.txt".as_ref()].into_iter())?;
+  Ok(())
+}
+
 pub fn main(opts: Opts, config: &PackageConfig) -> Result<(), anyhow::Error> {
   let targets = get_target(&opts, &config).context("parse target failed")?;
   resolve::main(opts.resolve, config).context("resolve failed")?;
@@ -112,7 +123,8 @@ pub fn main(opts: Opts, config: &PackageConfig) -> Result<(), anyhow::Error> {
   let units: BTreeMap<String, Vec<preprocess::Unit>> = serde_json::from_reader(std::fs::File::open("target/mods.json").context("open mods.json")?).context("read mods.json")?;
   for target in targets {
     let units_file = preprocess::src_files(&target, &units).context("gen src_files")?;
-    compile(target, "@target/deps.classpath", &format!("@target/src_files/{}", units_file))?;
+    let result = compile(target, "@target/deps.classpath", &format!("@target/src_files/{}", units_file))?;
+    package(&result, &config.resources)?;
   }
   Ok(())
 }
