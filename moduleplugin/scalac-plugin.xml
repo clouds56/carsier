@@ -1,0 +1,4 @@
+<plugin>
+  <name>moduletransform</name>
+  <classname>localhost.moduleplugin.ModulePlugin</classname>
+</plugin>

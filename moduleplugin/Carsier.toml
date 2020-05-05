@@ -1,0 +1,11 @@
+[package]
+name = "moduleplugin"
+version = "0.1.0"
+authors = ["Clouds Flowing <clouds.flowing@gmail.com>"]
+edition = "2.13"
+registry = "localhost"
+
+[dependencies]
+
+[[resources]]
+include = "scalac-plugin.xml"
