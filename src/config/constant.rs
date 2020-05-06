@@ -30,3 +30,15 @@ pub fn target_dir() -> std::path::PathBuf {
 pub fn default_registry() -> String {
   REGISTRY.to_string()
 }
+
+pub fn ensure_plugin() -> Result<std::path::PathBuf, anyhow::Error> {
+  use std::io::Write;
+  let plugin_path = std::path::Path::new("target/plugin.jar").to_owned();
+  if plugin_path.exists() {
+    return Ok(plugin_path)
+  }
+  std::fs::create_dir_all("target")?;
+  let mut f = std::fs::File::create(&plugin_path)?;
+  f.write(include_bytes!("../../configs/plugin.jar"))?;
+  Ok(plugin_path)
+}

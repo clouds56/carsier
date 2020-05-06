@@ -94,6 +94,7 @@ fn compile(target: Target, cp: &str, files: &str) -> Result<std::path::PathBuf, 
   let opts = vec![
     "--class-path", cp,
     "--source-path", "src",
+    "@target/plugin_opts"
   ];
   utils::call("scalac", opts.into_iter().map(std::ffi::OsStr::new).chain(vec![
     // "--dependency-file".as_ref(), target_dir().join("scala_dep").as_ref(),
@@ -120,9 +121,11 @@ pub fn main(opts: Opts, config: &PackageConfig) -> Result<(), anyhow::Error> {
   let targets = get_target(&opts, &config).context("parse target failed")?;
   resolve::main(opts.resolve, config).context("resolve failed")?;
   preprocess::main(opts.preprocess, config).context("preprocess failed")?;
+  ensure_plugin().context("write plugin failed")?;
+  let _ = utils::compare_and_write(target_dir().join("plugin_opts"), format!("-Xplugin:target/plugin.jar -P:moduler:name={}", config.package.name).as_bytes())?;
   let units: BTreeMap<String, Vec<preprocess::Unit>> = serde_json::from_reader(std::fs::File::open("target/mods.json").context("open mods.json")?).context("read mods.json")?;
   for target in targets {
-    let units_file = preprocess::src_files(&target, &units).context("gen src_files")?;
+    let units_file = preprocess::src_files(&target, &units, false).context("gen src_files")?;
     let result = compile(target, "@target/deps.classpath", &format!("@target/src_files/{}", units_file))?;
     package(&result, &config.resources)?;
   }

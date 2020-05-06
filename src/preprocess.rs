@@ -212,14 +212,14 @@ pub fn main(opts: Opts, config: &PackageConfig) -> Result<(), anyhow::Error> {
   Ok(())
 }
 
-pub fn src_files(target: &Target, units: &BTreeMap<String, Vec<Unit>>) -> Result<String, anyhow::Error> {
+pub fn src_files(target: &Target, units: &BTreeMap<String, Vec<Unit>>, is_target: bool) -> Result<String, anyhow::Error> {
   let base = target.name.to_string();
   let features = target.features.keys().cloned().collect::<BTreeSet<_>>();
-  let features_str = format!("{}{}", base, features.iter().map(|f| format!("-{}", f)).collect::<Vec<_>>().join(""));
+  let features_str = format!("{}{}{}", base, if is_target { "~target" } else { "" }, features.iter().map(|f| format!("-{}", f)).collect::<Vec<_>>().join(""));
   let paths_str = units.iter().filter(|(s, _)| !s.starts_with('@'))
     .flat_map(|(_, i)| i.iter()).filter(|i| i.features.is_empty() || !i.features.is_disjoint(&features))
     .chain(units.get(&format!("@{}.", base)).ok_or_else(|| anyhow::Error::msg("entrypoint not found"))?.iter())
-    .map(|i| target_dir().join(&i.path).display().to_string()).collect::<Vec<_>>().join("\n");
+    .map(|i| if is_target { target_dir().join(&i.path).display().to_string() } else { i.path.display().to_string() }).collect::<Vec<_>>().join("\n");
   let _ = utils::compare_and_write(target_dir().join("src_files").join(&features_str), paths_str.as_bytes())?;
   Ok(features_str)
 }
