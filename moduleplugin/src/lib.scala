@@ -39,7 +39,7 @@ class ModulePlugin(val global: Global) extends Plugin {
       var current: List[TermName] = base
 
       abstract class Prefix {
-
+        def toTerm = TermName(this.toString.replace("%", "$percent").replace("^", "$up").replace(":", "$colon"))
       }
       object Prefix {
         def from(term: TermName, pos: Position): Prefix = {
@@ -54,9 +54,18 @@ class ModulePlugin(val global: Global) extends Plugin {
             Other(term)
           }
         }
-        case class Other(term: TermName) extends Prefix;
-        case class Relative(n: Int) extends Prefix;
-        case object Absolute extends Prefix;
+        case class Other(term: TermName) extends Prefix {
+          override def toString = term.toString
+        }
+        case class Relative(n: Int) extends Prefix {
+          override def toString = n match {
+            case 0 => "%%"
+            case n => "%" + "^".repeat(n)
+          }
+        }
+        case object Absolute extends Prefix {
+          override def toString = "%"
+        }
       }
 
       override def transform(tree: Tree): Tree = {
@@ -66,9 +75,10 @@ class ModulePlugin(val global: Global) extends Plugin {
             val oldCurrent = this.current
             this.current = this.transformSelect(this.current, select)
             this.level += 1
-            val absoluteSelect = this.asRefTree(this.current ++ basePackage.reverse)
+            val absoluteSelect = this.asRefTree(this.current ++ basePackage)
+            val imports = this.asImport(this.current, 0)
             println(f"transform: $select => $absoluteSelect")
-            val tree = PackageDef(select, super.transformTrees(content))
+            val tree = PackageDef(if (level == 1) { absoluteSelect } else { select }, imports ++ super.transformTrees(content))
             this.level -= 1
             this.current = oldCurrent
             tree
@@ -77,10 +87,26 @@ class ModulePlugin(val global: Global) extends Plugin {
         }
       }
 
-      def asRefTree(terms: List[TermName]): RefTree = {
+      def asImport(terms: List[TermName], depth: Int): List[Tree] = {
+        val current = terms ++ basePackage
+        val select = this.asRefTree(current.tail, root=true)
+        val importStmt = Import(select, List(ImportSelector(current.head, -1, Prefix.Relative(depth).toTerm, -1)))
+        println(f"asImport $importStmt")
+        if (terms.isEmpty) {
+          val select = this.asRefTree(basePackage.tail, root=true)
+          val importStmt2 = Import(select, List(ImportSelector(basePackage.head, -1, Prefix.Absolute.toTerm, -1)))
+          List(importStmt, importStmt2)
+        } else {
+          importStmt :: this.asImport(terms.tail, depth + 1)
+        }
+      }
+
+      def asRefTree(terms: List[TermName], root: Boolean = false): RefTree = {
         terms match {
-          case List(term) => Ident(term)
-          case term :: tail => Select(this.asRefTree(tail), term)
+          case List(term) => if (root) {
+            Select(Ident(termNames.ROOTPKG), term)
+          } else { Ident(term) }
+          case term :: tail => Select(this.asRefTree(tail, root), term)
         }
       }
 
@@ -104,8 +130,8 @@ class ModulePlugin(val global: Global) extends Plugin {
     }
     class PackagePhase(prev: Phase) extends StdPhase(prev) {
       override def name = Component.this.phaseName
-      val basePath = Paths.get("src") // TODO: config via options
-      val basePackage = List(TermName("crates"))
+      val basePath = Paths.get("src") // TODO: config via options src_root
+      val basePackage = List(TermName("src"), TermName("crates")) // option crate_name, domain
       def apply(unit: CompilationUnit): Unit = {
         val path = Paths.get(unit.source.file.path).normalize
         if (path.startsWith(this.basePath)) {
