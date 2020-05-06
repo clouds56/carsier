@@ -73,10 +73,10 @@ class ModulePlugin(val global: Global) extends Plugin {
           case PackageDef(select, content) => {
             // TODO: check empty
             val oldCurrent = this.current
-            this.current = this.transformSelect(this.current, select)
+            this.current = this.transformSelect(this.current, select, this.level)
             this.level += 1
-            val absoluteSelect = this.asRefTree(this.current ++ basePackage)
-            val imports = this.asImport(this.current, 0)
+            val absoluteSelect = this.getRefTree(this.current ++ basePackage) // FIXME: check root
+            val imports = this.genImport(this.current, 0)
             println(f"transform: $select => $absoluteSelect")
             val tree = PackageDef(if (level == 1) { absoluteSelect } else { select }, imports ++ super.transformTrees(content))
             this.level -= 1
@@ -87,30 +87,30 @@ class ModulePlugin(val global: Global) extends Plugin {
         }
       }
 
-      def asImport(terms: List[TermName], depth: Int): List[Tree] = {
+      def genImport(terms: List[TermName], depth: Int): List[Tree] = {
         val current = terms ++ basePackage
-        val select = this.asRefTree(current.tail, root=true)
+        val select = this.getRefTree(current.tail, root=true)
         val importStmt = Import(select, List(ImportSelector(current.head, -1, Prefix.Relative(depth).toTerm, -1)))
         println(f"asImport $importStmt")
         if (terms.isEmpty) {
-          val select = this.asRefTree(basePackage.tail, root=true)
+          val select = this.getRefTree(basePackage.tail, root=true)
           val importStmt2 = Import(select, List(ImportSelector(basePackage.head, -1, Prefix.Absolute.toTerm, -1)))
           List(importStmt, importStmt2)
         } else {
-          importStmt :: this.asImport(terms.tail, depth + 1)
+          importStmt :: this.genImport(terms.tail, depth + 1)
         }
       }
 
-      def asRefTree(terms: List[TermName], root: Boolean = false): RefTree = {
+      def getRefTree(terms: List[TermName], root: Boolean = false): RefTree = {
         terms match {
           case List(term) => if (root) {
             Select(Ident(termNames.ROOTPKG), term)
           } else { Ident(term) }
-          case term :: tail => Select(this.asRefTree(tail, root), term)
+          case term :: tail => Select(this.getRefTree(tail, root), term)
         }
       }
 
-      def transformSelect(old: List[TermName], select: RefTree): List[TermName] = {
+      def transformSelect(old: List[TermName], select: RefTree, level: Int): List[TermName] = {
         select match {
           case Ident(term: TermName) => {
             Prefix.from(term, select.pos) match {
@@ -121,10 +121,12 @@ class ModulePlugin(val global: Global) extends Plugin {
                 }
                 old.dropRight(n)
               }
-              case Prefix.Other(term) => term :: old
+              case Prefix.Other(term) => {
+                if (level == 0) { List(term) } else { term :: old }
+              }
             }
           }
-          case Select(select: RefTree, term: TermName) => term :: this.transformSelect(old, select)
+          case Select(select: RefTree, term: TermName) => term :: this.transformSelect(old, select, level)
         }
       }
     }
