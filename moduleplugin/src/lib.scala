@@ -28,6 +28,30 @@ class ModulePlugin(val global: Global) extends Plugin {
   val description = "transform module"
   val components = List[PluginComponent](Component)
 
+  var basePath = Paths.get("src") // default to "src" folder
+  var registry = List(TermName("crates")) // note: reverse
+  var packageName: TermName = termNames.EMPTY_PACKAGE_NAME
+  var entryPoint = "main" // TODO
+
+  def basePackage = packageName :: registry
+
+  override def init(options: List[String], error: String => Unit): Boolean = {
+    for (option <- options) {
+      if (option.startsWith("src=")) {
+        basePath = Paths.get(option.substring("src=".length))
+      } else if (option.startsWith("registry=")) {
+        registry = option.substring("registry=".length).split('.').toList.map(TermName(_))
+      } else if (option.startsWith("name=")) {
+        packageName = TermName(option.substring("name=".length))
+      } else if (option.startsWith("entry-point=")) {
+        entryPoint = option.substring("entry-point=".length)
+      } else {
+        error("Option not understood: "+option)
+      }
+    }
+    true
+  }
+
   private object Component extends PluginComponent {
     val global: ModulePlugin.this.global.type = ModulePlugin.this.global
     val runsAfter = List[String]("parser")
@@ -89,15 +113,15 @@ class ModulePlugin(val global: Global) extends Plugin {
 
       def genImport(terms: List[TermName], depth: Int): List[Tree] = {
         val current = terms ++ basePackage
-        val select = this.getRefTree(current.tail, root=true)
+        val select = getRefTree(current.tail, root=true)
         val importStmt = Import(select, List(ImportSelector(current.head, -1, Prefix.Relative(depth).toTerm, -1)))
         println(f"asImport $importStmt")
         if (terms.isEmpty) {
-          val select = this.getRefTree(basePackage.tail, root=true)
+          val select = getRefTree(basePackage.tail, root=true)
           val importStmt2 = Import(select, List(ImportSelector(basePackage.head, -1, Prefix.Absolute.toTerm, -1)))
           List(importStmt, importStmt2)
         } else {
-          importStmt :: this.genImport(terms.tail, depth + 1)
+          importStmt :: genImport(terms.tail, depth + 1)
         }
       }
 
@@ -106,7 +130,7 @@ class ModulePlugin(val global: Global) extends Plugin {
           case List(term) => if (root) {
             Select(Ident(termNames.ROOTPKG), term)
           } else { Ident(term) }
-          case term :: tail => Select(this.getRefTree(tail, root), term)
+          case term :: tail => Select(getRefTree(tail, root), term)
         }
       }
 
@@ -126,28 +150,31 @@ class ModulePlugin(val global: Global) extends Plugin {
               }
             }
           }
-          case Select(select: RefTree, term: TermName) => term :: this.transformSelect(old, select, level)
+          case Select(select: RefTree, term: TermName) => term :: transformSelect(old, select, level)
         }
       }
     }
     class PackagePhase(prev: Phase) extends StdPhase(prev) {
       override def name = Component.this.phaseName
-      val basePath = Paths.get("src") // TODO: config via options src_root
-      val basePackage = List(TermName("src"), TermName("crates")) // option crate_name, domain
       def apply(unit: CompilationUnit): Unit = {
         val path = Paths.get(unit.source.file.path).normalize
-        if (path.startsWith(this.basePath)) {
-          val module = this.pathToModule(basePath.relativize(path))
+        if (path.startsWith(basePath)) {
+          val module = pathToModule(basePath.relativize(path)).toList
           println(f"processing unit: $path => $module")
-          new ModulerTransformer(this.basePackage, module.toList).transformUnit(unit)
+          new ModulerTransformer(basePackage, module).transformUnit(unit)
         } else {
           global.reporter.error(unit.body.pos, "file out of source tree")
         }
       }
       def pathToModule(path: Path): Seq[TermName] = {
-        (0 until path.getNameCount)
+        val result = (0 until path.getNameCount)
           .map(path.getName(_).toString.trimEndsMatches(".scala"))
           .filter(_ != "lib").map(TermName(_))
+        if (result == List(TermName(entryPoint))) {
+          List()
+        } else {
+          result
+        }
       }
     }
   }
